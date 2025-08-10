@@ -1,2 +1,16 @@
+build/
+dist/
+*.spec
+
+venv/
+.venv/
+
 credentials.json
 .env
+
+dati_emails.txt
+
+__pycache__/
+*.pyc
+
+*.log

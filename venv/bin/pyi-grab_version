@@ -1,4 +1,4 @@
-#!/home/mxttjaw/Projects/email_bot/venv/bin/python3
+#!/home/mxttjaw/Projects/DataToSheets/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
