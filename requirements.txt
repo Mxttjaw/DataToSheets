@@ -17,6 +17,7 @@ pyasn1_modules==0.4.2
 pyinstaller==6.15.0
 pyinstaller-hooks-contrib==2025.8
 pyparsing==3.2.3
+python-dotenv==1.1.1
 requests==2.32.4
 requests-oauthlib==2.0.0
 rsa==4.9.1
