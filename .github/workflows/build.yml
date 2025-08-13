@@ -1,32 +1,13 @@
-name: Build and Release
+name: Build and Release (x86 with Icons)
 
 on:
   push:
     tags:
-      - "v*-x86"
-      - "v*-arm"
-      - "v*"
+      - "v*" # Trigger per tutte le versioni (es: v1.0.0)
 
 jobs:
-  build_x86:
-    if: |
-      contains(github.ref, '-x86') || 
-      (!contains(github.ref, '-arm') && !contains(github.ref, '-x86'))
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            artifact_name: DataToSheets-Linux-x86_64
-            pyinstaller_args: --onefile --name DataToSheets src/bot.py
-          - os: macos-latest
-            artifact_name: DataToSheets-macOS-x86_64
-            pyinstaller_args: --onefile --name DataToSheets src/bot.py
-          - os: windows-latest
-            artifact_name: DataToSheets-Windows-x86_64.exe
-            pyinstaller_args: --onefile --name DataToSheets --noconsole src/bot.py
-
+  linux_x86:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -41,32 +22,23 @@ jobs:
           pip install -r src/requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
-        run: pyinstaller ${{ matrix.pyinstaller_args }}
+      - name: Build Linux executable
+        run: |
+          pyinstaller \
+            --onefile \
+            --name DataToSheets \
+            --icon=src/assets/icons/bot_icon.png \
+            --add-data="src/assets/icons/bot_icon.png:assets/icons" \
+            src/bot.py
 
-      - name: Upload x86 artifact
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: DataToSheets-Linux-x86_64
           path: dist/DataToSheets*
 
-  build_arm:
-    if: |
-      contains(github.ref, '-arm') || 
-      (!contains(github.ref, '-x86') && !contains(github.ref, '-arm'))
-    runs-on: ${{ matrix.os }}
-    needs: []
-    strategy:
-      matrix:
-        os: [macos-13-arm64, ubuntu-22.04-arm64]
-        include:
-          - os: macos-13-arm64
-            artifact_name: DataToSheets-macOS-arm64
-            pyinstaller_args: --onefile --name DataToSheets src/bot.py
-          - os: ubuntu-22.04-arm64
-            artifact_name: DataToSheets-Linux-arm64
-            pyinstaller_args: --onefile --name DataToSheets src/bot.py
-
+  macos_x86:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -81,11 +53,50 @@ jobs:
           pip install -r src/requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
-        run: pyinstaller ${{ matrix.pyinstaller_args }}
+      - name: Build macOS executable
+        run: |
+          pyinstaller \
+            --onefile \
+            --name DataToSheets \
+            --icon=src/assets/icons/bot_icon.icns \
+            --add-data="src/assets/icons/bot_icon.icns:assets/icons" \
+            --osx-bundle-identifier com.yourcompany.DataToSheets \
+            src/bot.py
 
-      - name: Upload ARM artifact
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: DataToSheets-macOS-x86_64
           path: dist/DataToSheets*
+
+  windows_x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows executable
+        run: |
+          pyinstaller \
+            --onefile \
+            --name DataToSheets \
+            --icon=src/assets/icons/bot_icon.ico \
+            --add-data="src/assets/icons/bot_icon.ico:assets/icons" \
+            --noconsole \
+            src/bot.py
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DataToSheets-Windows-x86_64.exe
+          path: dist/DataToSheets.exe
