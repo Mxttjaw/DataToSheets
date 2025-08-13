@@ -315,23 +315,29 @@ class BotApp(ttk.Frame):
         """
         Inizializza il processo di aggiornamento.
         """
-        import tempfile
-         
-        self._log_message("Avvio del processo di aggiornamento...")
-        
-        download_url = self._get_download_url()
-        if not download_url:
-            messagebox.showerror("Errore Aggiornamento", "URL di download non trovato per il tuo sistema operativo.")
+        try:
+            import tempfile  
+            tempfile.gettempdir() 
+        except ImportError as ie:
+            self._log_message(f"ERRORE CRITICO: Impossibile importare tempfile: {ie}")
+            messagebox.showerror("Errore Critico", f"Modulo tempfile non disponibile: {ie}")
             return
 
+        self._log_message("Avvio del processo di aggiornamento...")
+        
         try:
-            # Scarica la nuova versione
+            download_url = self._get_download_url()
+            if not download_url:
+                messagebox.showerror("Errore Aggiornamento", "URL di download non trovato per il tuo sistema operativo.")
+                return
+
             self._log_message(f"Download in corso da: {download_url}")
             response = requests.get(download_url, stream=True, timeout=30)
             response.raise_for_status()
             
-            # Crea un nome temporaneo per il nuovo file
             temp_dir = tempfile.gettempdir()
+            self._log_message(f"Directory temporanea: {temp_dir}")
+            
             if platform.system() == "Windows":
                 new_exe_name = "DataToSheets_new.exe"
             else:
@@ -344,19 +350,16 @@ class BotApp(ttk.Frame):
             
             self._log_message("Nuova versione scaricata con successo.")
             
-            # Rendi il file eseguibile (solo su Unix)
+
             if platform.system() != "Windows":
                 os.chmod(new_exe_path, 0o755)
             
-            # Avvia lo script di aggiornamento
             self.launch_updater_script(new_exe_path)
             self.master.destroy() 
         
         except Exception as e:
-            self._log_message(f"Errore durante il download o il lancio dell'updater: {e}")
-            messagebox.showerror("Errore Aggiornamento", f"Non è stato possibile aggiornare il bot: {e}")
-
-
+            self._log_message(f"Errore durante il download o il lancio dell'updater: {str(e)}")
+            messagebox.showerror("Errore Aggiornamento", f"Non è stato possibile aggiornare il bot: {str(e)}")
 
     def _get_latest_version(self):
         """
@@ -387,6 +390,8 @@ class BotApp(ttk.Frame):
                 self._log_message("[ERRORE] Impossibile ottenere l'ultima versione")
                 return None
                 
+            latest_version = latest_version.replace("-fixed", "-fix")
+            
             if not latest_version.startswith('v'):
                 latest_version = f'v{latest_version}'
                 self._log_message(f"[DEBUG] Aggiunto prefisso 'v' alla versione: {latest_version}")
