@@ -3,13 +3,15 @@ name: Build and Release
 on:
   push:
     tags:
-      - "v*-x86" # Trigger solo build x86 (es: v1.0.0-x86)
-      - "v*-arm" # Trigger solo build ARM (es: v1.0.0-arm)
-      - "v*" # Trigger build completa (default)
+      - "v*-x86"
+      - "v*-arm"
+      - "v*"
 
 jobs:
   build_x86:
-    if: contains(github.ref, 'x86') || (!contains(github.ref, 'arm') && !contains(github.ref, 'x86'))
+    if: |
+      contains(github.ref, '-x86') || 
+      (!contains(github.ref, '-arm') && !contains(github.ref, '-x86'))
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -49,8 +51,11 @@ jobs:
           path: dist/DataToSheets*
 
   build_arm:
-    if: contains(github.ref, 'arm') || (!contains(github.ref, 'x86') && !contains(github.ref, 'arm'))
+    if: |
+      contains(github.ref, '-arm') || 
+      (!contains(github.ref, '-x86') && !contains(github.ref, '-arm'))
     runs-on: ${{ matrix.os }}
+    needs: []
     strategy:
       matrix:
         os: [macos-13-arm64, ubuntu-22.04-arm64]
