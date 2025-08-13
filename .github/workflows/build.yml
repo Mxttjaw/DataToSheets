@@ -94,27 +94,28 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Aggiunto per risolvere l'errore 403
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: List downloaded files (debug)
+        run: ls -R artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }} # Cambiato da release_name a name
           body: |
             Auto-generated release for version ${{ github.ref_name }}
-            Files:
-            - DataToSheets-Windows.exe
-            - DataToSheets-Linux
-            - DataToSheets-macOS
           files: |
-            artifacts/DataToSheets-Windows.exe
-            artifacts/DataToSheets-Linux
-            artifacts/DataToSheets-macOS
+            artifacts/DataToSheets-Windows.exe/DataToSheets-Windows.exe
+            artifacts/DataToSheets-Linux/DataToSheets-Linux
+            artifacts/DataToSheets-macOS/DataToSheets-macOS
