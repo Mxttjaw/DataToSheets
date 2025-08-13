@@ -6,8 +6,26 @@ on:
       - "v*"
 
 jobs:
-  linux_x86:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: DataToSheets-Linux
+            exe_name: DataToSheets-Linux
+            icon: ""
+          - os: windows-latest
+            artifact_name: DataToSheets-Windows.exe
+            exe_name: DataToSheets-Windows.exe
+            icon: "--icon=src/assets/icons/bot_icon.ico"
+          - os: macos-latest
+            artifact_name: DataToSheets-macOS
+            exe_name: DataToSheets-macOS
+            icon: "--icon=src/assets/icons/bot_icon.icns"
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -16,7 +34,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-tk python3-dev
@@ -26,50 +45,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
-          pip install .
-
-      - name: Create hooks directory
-        run: mkdir -p hooks
-
-      - name: Add PIL hook
-        run: |
-          echo 'from PyInstaller.utils.hooks import collect_submodules
-                hiddenimports = collect_submodules("PIL")' > hooks/hook-pil.py
-
-      - name: Build Linux executable
-        run: |
-          pyinstaller \
-            --onefile \
-            --name DataToSheets \
-            --add-data="src/assets/icons/bot_icon.png:assets/icons" \
-            --additional-hooks-dir=hooks \
-            --hidden-import='PIL._tkinter_finder' \
-            --hidden-import='PIL.Image' \
-            --hidden-import='PIL.ImageTk' \
-            --collect-all='PIL' \
-            src/bot.py
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: DataToSheets-Linux-x86_64
-          path: dist/DataToSheets
-
-  macos_x86:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r src/requirements.txt
-          pip install pyinstaller pillow==9.5.0
+          pip install pyinstaller  # Installiamo solo pyinstaller senza il punto
 
       - name: Create hooks directory
         run: mkdir -p hooks
@@ -79,67 +55,51 @@ jobs:
           echo 'from PyInstaller.utils.hooks import collect_submodules
           hiddenimports = collect_submodules("PIL")' > hooks/hook-pil.py
 
-      - name: Build macOS executable
+      - name: Build executable
         run: |
           pyinstaller \
             --onefile \
-            --name DataToSheets \
-            --icon=src/assets/icons/bot_icon.icns \
-            --add-data="src/assets/icons/bot_icon.icns:assets/icons" \
+            --name ${{ matrix.exe_name }} \
+            ${{ matrix.icon }} \
+            --add-data="src/assets/icons/*:assets/icons" \
             --additional-hooks-dir=hooks \
             --hidden-import='PIL._tkinter_finder' \
             --hidden-import='PIL.Image' \
             --hidden-import='PIL.ImageTk' \
-            --osx-bundle-identifier com.yourdomain.DataToSheets \
+            $( [ "${{ matrix.os }}" == "windows-latest" ] && echo "--noconsole" ) \
+            $( [ "${{ matrix.os }}" == "macos-latest" ] && echo "--osx-bundle-identifier com.yourdomain.DataToSheets" ) \
             src/bot.py
 
-      - name: Upload macOS artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DataToSheets-macOS-x86_64
-          path: dist/DataToSheets*
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.exe_name }}
 
-  windows_x86:
-    runs-on: windows-latest
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          python-version: "3.10"
+          path: artifacts
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r src/requirements.txt
-          pip install pyinstaller pillow==9.5.0
-
-      - name: Create hooks directory
-        run: mkdir hooks
-
-      - name: Add PIL hook
-        run: |
-          echo 'from PyInstaller.utils.hooks import collect_submodules
-          hiddenimports = collect_submodules("PIL")' > hooks/hook-pil.py
-
-      - name: Build Windows executable
-        shell: cmd
-        run: |
-          pyinstaller ^
-            --onefile ^
-            --name DataToSheets ^
-            --icon=src/assets/icons/bot_icon.ico ^
-            --add-data="src/assets/icons/bot_icon.ico;assets/icons" ^
-            --additional-hooks-dir=hooks ^
-            --hidden-import="PIL._tkinter_finder" ^
-            --hidden-import="PIL.Image" ^
-            --hidden-import="PIL.ImageTk" ^
-            --noconsole ^
-            src/bot.py
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: DataToSheets-Windows-x86_64.exe
-          path: dist/DataToSheets.exe
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Auto-generated release for version ${{ github.ref_name }}
+            Files:
+            - DataToSheets-Windows.exe
+            - DataToSheets-Linux
+            - DataToSheets-macOS
+          files: |
+            artifacts/DataToSheets-Windows.exe
+            artifacts/DataToSheets-Linux
+            artifacts/DataToSheets-macOS
