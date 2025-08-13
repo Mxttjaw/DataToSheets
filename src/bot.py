@@ -5,6 +5,7 @@ import sys
 import json
 import time
 import shutil
+import tempfile
 import platform
 import subprocess
 import configparser
@@ -357,44 +358,55 @@ class BotApp(ttk.Frame):
 
     def _get_latest_version(self):
         """
-        Ottiene l'ultima versione disponibile dall'API di GitHub
+        Ottiene l'ultima versione dall'API GitHub garantendo il formato corretto
         """
         try:
             api_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest"
             response = requests.get(api_url, timeout=10)
             response.raise_for_status()
-            return response.json().get('tag_name', '')
+            
+            tag_name = response.json().get('tag_name', '')
+            if tag_name and not tag_name.startswith('v'):
+                tag_name = f'v{tag_name}'
+                
+            self._log_message(f"[DEBUG] Ultima versione rilevata: {tag_name}")
+            return tag_name
+            
         except Exception as e:
-            self._log_message(f"Errore nel recupero dell'ultima versione: {str(e)}")
+            self._log_message(f"[ERRORE] Recupero versione fallito: {str(e)}")
             return None
 
     def _get_download_url(self):
         """
-        Versione corretta che genera l'URL di download diretto
+        Genera l'URL di download garantendo il prefisso 'v' nella versione
         """
         try:
-            # Ottieni l'ultima versione (esempio - sostituisci con la tua logica)
-            latest_version = "v1.0.99-test-fix"  # Sostituisci con self._get_latest_version()
+           
+            latest_version = self._get_latest_version() 
             
-            # Determina il nome file in base all'OS
+           
+            if not latest_version.startswith('v'):
+                latest_version = f'v{latest_version}'
+                self._log_message(f"[DEBUG] Aggiunto prefisso 'v' alla versione: {latest_version}")
+            
+           
             system = platform.system()
-            if system == "Windows":
-                filename = "DataToSheets-Windows.exe"
-            elif system == "Darwin":
-                filename = "DataToSheets-macOS"
-            else:  # Linux
-                filename = "DataToSheets-Linux"
-
-            # Costruisci l'URL di download diretto
+            filename = {
+                "Windows": "DataToSheets-Windows.exe",
+                "Darwin": "DataToSheets-macOS",
+                "Linux": "DataToSheets-Linux"
+            }.get(system, "DataToSheets-Linux")  
+            
+            
             download_url = f"https://github.com/Mxttjaw/DataToSheets/releases/download/{latest_version}/{filename}"
             
-            # Debug
-            self._log_message(f"[DEBUG] Tentativo download da: {download_url}")
+           
+            self._log_message(f"[DEBUG] URL generato: {download_url}")
             
             return download_url
 
         except Exception as e:
-            self._log_message(f"Errore generazione URL: {str(e)}")
+            self._log_message(f"[ERRORE] Generazione URL fallita: {str(e)}")
             return None
 
     def launch_updater_script(self, new_exe_path):
