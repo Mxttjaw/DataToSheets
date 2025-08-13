@@ -32,7 +32,7 @@ else:
 # Carica le variabili d'ambiente
 load_dotenv()
 
-CURRENT_VERSION = "0.0.1"
+CURRENT_VERSION = "1.0.1"
 
 
 class BotApp(ttk.Frame):
@@ -287,7 +287,7 @@ class BotApp(ttk.Frame):
         Controlla se è disponibile un aggiornamento del bot.
         """
         self._log_message("Controllo aggiornamenti in corso...")
-        github_repo_url = "https://api.github.com/repos/tuo_utente/tuo_repo_bot/releases/latest"
+        github_repo_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest"
         
         try:
             response = requests.get(github_repo_url, timeout=10)
@@ -298,7 +298,9 @@ class BotApp(ttk.Frame):
             if latest_version > CURRENT_VERSION:
                 self.update_available.set(True)
                 self._log_message(f"Aggiornamento disponibile! Versione attuale: {CURRENT_VERSION}, ultima versione: {latest_version}.")
-                messagebox.showinfo("Aggiornamento Disponibile", f"Una nuova versione del bot ({latest_version}) è disponibile per il download.")
+                messagebox.showinfo("Aggiornamento Disponibile", 
+                    f"Una nuova versione del bot ({latest_version}) è disponibile per il download.\n\n"
+                    "Clicca su 'Aggiorna Bot' per installare la nuova versione.")
             else:
                 self.update_available.set(False)
                 self._log_message("Il bot è già aggiornato all'ultima versione.")
@@ -306,6 +308,7 @@ class BotApp(ttk.Frame):
         except requests.exceptions.RequestException as e:
             self._log_message(f"Errore durante il controllo degli aggiornamenti: {e}")
             self.update_available.set(False)
+
 
     def update_bot(self):
         """
@@ -319,15 +322,30 @@ class BotApp(ttk.Frame):
             return
 
         try:
+            # Scarica la nuova versione
+            self._log_message(f"Download in corso da: {download_url}")
             response = requests.get(download_url, stream=True, timeout=30)
             response.raise_for_status()
             
-            new_exe_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "new_bot")
+            # Crea un nome temporaneo per il nuovo file
+            temp_dir = tempfile.gettempdir()
+            if platform.system() == "Windows":
+                new_exe_name = "DataToSheets_new.exe"
+            else:
+                new_exe_name = "DataToSheets_new"
+                
+            new_exe_path = os.path.join(temp_dir, new_exe_name)
+            
             with open(new_exe_path, "wb") as f:
                 shutil.copyfileobj(response.raw, f)
             
             self._log_message("Nuova versione scaricata con successo.")
             
+            # Rendi il file eseguibile (solo su Unix)
+            if platform.system() != "Windows":
+                os.chmod(new_exe_path, 0o755)
+            
+            # Avvia lo script di aggiornamento
             self.launch_updater_script(new_exe_path)
             self.master.destroy() 
         
@@ -337,15 +355,28 @@ class BotApp(ttk.Frame):
 
     def _get_download_url(self):
         """Restituisce l'URL di download corretto in base al sistema operativo."""
-        github_release_url = "https://github.com/tuo_utente/tuo_repo_bot/releases/download/v1.1.0"
+        github_release_url = "https://github.com/Mxttjaw/DataToSheets/releases/latest/download"
         
         system = platform.system()
+        machine = platform.machine().lower()
+        
         if system == "Windows":
-            return f"{github_release_url}/tuo_bot.exe"
+            if "64" in machine:
+                return f"{github_release_url}/DataToSheets-Windows-x86_64.exe"
+            else:
+                return f"{github_release_url}/DataToSheets-Windows-i386.exe"
         elif system == "Darwin":
-            return f"{github_release_url}/tuo_bot_macos"
+            if "arm" in machine:
+                return f"{github_release_url}/DataToSheets-macOS-arm64"
+            else:
+                return f"{github_release_url}/DataToSheets-macOS-x86_64"
         elif system == "Linux":
-            return f"{github_release_url}/tuo_bot_linux"
+            if "arm" in machine or "aarch" in machine:
+                return f"{github_release_url}/DataToSheets-Linux-arm64"
+            elif "64" in machine:
+                return f"{github_release_url}/DataToSheets-Linux-x86_64"
+            else:
+                return f"{github_release_url}/DataToSheets-Linux-i386"
         else:
             return None
 
@@ -354,33 +385,44 @@ class BotApp(ttk.Frame):
         Crea e avvia lo script temporaneo che si occuperà di sostituire il file.
         """
         current_exe_path = sys.executable
+        temp_dir = tempfile.gettempdir()
+        
         if platform.system() == "Windows":
-            updater_script = "updater.bat"
+            updater_script = os.path.join(temp_dir, "DataToSheets_updater.bat")
             script_content = f"""
             @echo off
-            timeout /t 5 /nobreak
-            copy "{new_exe_path}" "{current_exe_path}"
-            del "{new_exe_path}"
+            timeout /t 3 /nobreak >nul
+            taskkill /F /PID {os.getpid()} >nul 2>&1
+            move /Y "{new_exe_path}" "{current_exe_path}" >nul
             start "" "{current_exe_path}"
-            exit
+            del "%~f0"
             """
-            with open(updater_script, "w") as f:
-                f.write(script_content)
-            subprocess.Popen([updater_script], creationflags=subprocess.CREATE_NO_WINDOW)
-        else:
-            updater_script = "updater.sh"
-            script_content = f"""
-            #!/bin/bash
-            sleep 5
-            mv "{new_exe_path}" "{current_exe_path}"
+        else:  # macOS e Linux
+            updater_script = os.path.join(temp_dir, "DataToSheets_updater.sh")
+            script_content = f"""#!/bin/bash
+            sleep 3
+            kill -9 {os.getpid()} >/dev/null 2>&1
+            mv -f "{new_exe_path}" "{current_exe_path}" >/dev/null 2>&1
             chmod +x "{current_exe_path}"
-            nohup "{current_exe_path}" &
-            exit
+            nohup "{current_exe_path}" >/dev/null 2>&1 &
+            rm -f "$0"
             """
+        
+        try:
             with open(updater_script, "w") as f:
                 f.write(script_content)
-            os.chmod(updater_script, 0o755) 
-            subprocess.Popen(["bash", updater_script])
+            
+            if platform.system() != "Windows":
+                os.chmod(updater_script, 0o755)
+            
+            # Avvia lo script di aggiornamento
+            if platform.system() == "Windows":
+                subprocess.Popen([updater_script], creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                subprocess.Popen([updater_script], start_new_session=True)
+        except Exception as e:
+            self._log_message(f"Errore durante la creazione dello script di aggiornamento: {e}")
+            messagebox.showerror("Errore Aggiornamento", f"Errore durante l'avvio del processo di aggiornamento: {e}")
 
     # --- Metodi per la gestione dei file e dell'interfaccia utente ---
     

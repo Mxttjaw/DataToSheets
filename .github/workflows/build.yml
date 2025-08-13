@@ -17,7 +17,7 @@ jobs:
             icon: ""
           - os: windows-latest
             artifact_name: DataToSheets-Windows.exe
-            exe_name: DataToSheets-Windows.exe
+            exe_name: DataToSheets-Windows
             icon: "--icon=src/assets/icons/bot_icon.ico"
           - os: macos-latest
             artifact_name: DataToSheets-macOS
@@ -44,8 +44,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r src/requirements.txt
-          pip install pyinstaller  # Installiamo solo pyinstaller senza il punto
+          pip install -r src/requirements.txt pyinstaller
 
       - name: Create hooks directory
         run: mkdir -p hooks
@@ -55,7 +54,8 @@ jobs:
           echo 'from PyInstaller.utils.hooks import collect_submodules
           hiddenimports = collect_submodules("PIL")' > hooks/hook-pil.py
 
-      - name: Build executable
+      - name: Build executable (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           pyinstaller \
             --onefile \
@@ -66,15 +66,30 @@ jobs:
             --hidden-import='PIL._tkinter_finder' \
             --hidden-import='PIL.Image' \
             --hidden-import='PIL.ImageTk' \
-            $( [ "${{ matrix.os }}" == "windows-latest" ] && echo "--noconsole" ) \
             $( [ "${{ matrix.os }}" == "macos-latest" ] && echo "--osx-bundle-identifier com.yourdomain.DataToSheets" ) \
+            src/bot.py
+
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: |
+          pyinstaller ^
+            --onefile ^
+            --name ${{ matrix.exe_name }} ^
+            ${{ matrix.icon }} ^
+            --add-data="src/assets/icons/*;assets/icons" ^
+            --additional-hooks-dir=hooks ^
+            --hidden-import="PIL._tkinter_finder" ^
+            --hidden-import="PIL.Image" ^
+            --hidden-import="PIL.ImageTk" ^
+            --noconsole ^
             src/bot.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.exe_name }}
+          path: dist/${{ matrix.exe_name }}*
 
   release:
     needs: build
