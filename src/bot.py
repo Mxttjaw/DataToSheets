@@ -311,21 +311,15 @@ class BotApp(ttk.Frame):
             self.update_available.set(False)
 
 
-    def update_bot(self):
-        """
-        Inizializza il processo di aggiornamento.
-        """
-        try:
-            import tempfile  
-            tempfile.gettempdir() 
-        except ImportError as ie:
-            self._log_message(f"ERRORE CRITICO: Impossibile importare tempfile: {ie}")
-            messagebox.showerror("Errore Critico", f"Modulo tempfile non disponibile: {ie}")
-            return
 
+    def update_bot(self):
+        """Inizializza il processo di aggiornamento"""
         self._log_message("Avvio del processo di aggiornamento...")
         
         try:
+            # Il modulo tempfile è già importato all'inizio del file, quindi questo test non serve.
+            # Rimuovere questo blocco risolve l'errore 'name 'tempfile' is not defined'.
+            
             download_url = self._get_download_url()
             if not download_url:
                 messagebox.showerror("Errore Aggiornamento", "URL di download non trovato per il tuo sistema operativo.")
@@ -360,93 +354,75 @@ class BotApp(ttk.Frame):
         except Exception as e:
             self._log_message(f"Errore durante il download o il lancio dell'updater: {str(e)}")
             messagebox.showerror("Errore Aggiornamento", f"Non è stato possibile aggiornare il bot: {str(e)}")
-
+            
     def _get_latest_version(self):
-        """
-        Ottiene l'ultima versione dall'API GitHub garantendo il formato corretto
-        """
+        """Ottiene l'ultima versione esatta da GitHub"""
         try:
-            api_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest"
-            response = requests.get(api_url, timeout=10)
+            response = requests.get(
+                "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest",
+                timeout=10
+            )
             response.raise_for_status()
-            
-            tag_name = response.json().get('tag_name', '')
-            if tag_name and not tag_name.startswith('v'):
-                tag_name = f'v{tag_name}'
-                
-            self._log_message(f"[DEBUG] Ultima versione rilevata: {tag_name}")
-            return tag_name
-            
+            return response.json().get('tag_name', '')
         except Exception as e:
-            self._log_message(f"[ERRORE] Recupero versione fallito: {str(e)}")
+            self._log_message(f"Errore recupero versione: {e}")
             return None
 
+
     def _get_download_url(self):
-        """Genera l'URL di download garantendo il prefisso 'v' nella versione"""
+        """
+        Genera l'URL di download con la versione esatta.
+        NOTA: Ho corretto la logica per usare il tag della release esattamente come viene fornito da GitHub,
+        senza pulire la 'v' iniziale, in quanto l'URL di download lo richiede.
+        """
         try:
-            latest_version = self._get_latest_version() 
+            response = requests.get(
+                "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest",
+                timeout=10
+            )
+            response.raise_for_status()
+            latest_release = response.json()
+            latest_tag = latest_release.get('tag_name', '')
             
-            if not latest_version:
-                self._log_message("[ERRORE] Impossibile ottenere l'ultima versione")
+            if not latest_tag:
+                self._log_message("[ERRORE] Impossibile ottenere il tag di release da GitHub.")
                 return None
-                
-            latest_version = latest_version.replace("-fixed", "-fix")
             
-            if not latest_version.startswith('v'):
-                latest_version = f'v{latest_version}'
-                self._log_message(f"[DEBUG] Aggiunto prefisso 'v' alla versione: {latest_version}")
+            self._log_message(f"[DEBUG] Tentativo download da: {latest_tag}")
             
             system = platform.system()
             filename = {
                 "Windows": "DataToSheets-Windows.exe",
                 "Darwin": "DataToSheets-macOS",
                 "Linux": "DataToSheets-Linux"
-            }.get(system, "DataToSheets-Linux")  
-            
-            download_url = f"https://github.com/Mxttjaw/DataToSheets/releases/download/{latest_version}/{filename}"
-            
-            self._log_message(f"[DEBUG] URL generato: {download_url}")
-            return download_url
+            }.get(system)
 
+            if not filename:
+                self._log_message(f"[ERRORE] Sistema operativo non supportato: {system}")
+                return None
+                
+            download_url = f"https://github.com/Mxttjaw/DataToSheets/releases/download/{latest_tag}/{filename}"
+            return download_url
+        
         except Exception as e:
             self._log_message(f"[ERRORE] Generazione URL fallita: {str(e)}")
             return None
 
     def launch_updater_script(self, new_exe_path):
-        """
-        Crea e avvia lo script temporaneo che si occuperà di sostituire il file.
-        """
+        """ Crea e avvia lo script temporaneo che si occuperà di sostituire il file. """
         current_exe_path = sys.executable
         temp_dir = tempfile.gettempdir()
-        
         if platform.system() == "Windows":
             updater_script = os.path.join(temp_dir, "DataToSheets_updater.bat")
-            script_content = f"""
-            @echo off
-            timeout /t 3 /nobreak >nul
-            taskkill /F /PID {os.getpid()} >nul 2>&1
-            move /Y "{new_exe_path}" "{current_exe_path}" >nul
-            start "" "{current_exe_path}"
-            del "%~f0"
-            """
-        else:  # macOS e Linux
+            script_content = f""" @echo off timeout /t 3 /nobreak >nul taskkill /F /PID {os.getpid()} >nul 2>&1 move /Y "{new_exe_path}" "{current_exe_path}" >nul start "" "{current_exe_path}" del "%~f0" """
+        else: # macOS e Linux
             updater_script = os.path.join(temp_dir, "DataToSheets_updater.sh")
-            script_content = f"""#!/bin/bash
-            sleep 3
-            kill -9 {os.getpid()} >/dev/null 2>&1
-            mv -f "{new_exe_path}" "{current_exe_path}" >/dev/null 2>&1
-            chmod +x "{current_exe_path}"
-            nohup "{current_exe_path}" >/dev/null 2>&1 &
-            rm -f "$0"
-            """
-        
+            script_content = f"""#!/bin/bash sleep 3 kill -9 {os.getpid()} >/dev/null 2>&1 mv -f "{new_exe_path}" "{current_exe_path}" >/dev/null 2>&1 chmod +x "{current_exe_path}" nohup "{current_exe_path}" >/dev/null 2>&1 & rm -f "$0" """
         try:
             with open(updater_script, "w") as f:
                 f.write(script_content)
-            
             if platform.system() != "Windows":
                 os.chmod(updater_script, 0o755)
-            
             # Avvia lo script di aggiornamento
             if platform.system() == "Windows":
                 subprocess.Popen([updater_script], creationflags=subprocess.CREATE_NO_WINDOW)
@@ -455,7 +431,6 @@ class BotApp(ttk.Frame):
         except Exception as e:
             self._log_message(f"Errore durante la creazione dello script di aggiornamento: {e}")
             messagebox.showerror("Errore Aggiornamento", f"Errore durante l'avvio del processo di aggiornamento: {e}")
-
     # --- Metodi per la gestione dei file e dell'interfaccia utente ---
     
     def show_tutorial_window(self):
