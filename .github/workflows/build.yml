@@ -77,7 +77,7 @@ jobs:
       - name: Add PIL hook
         run: |
           echo 'from PyInstaller.utils.hooks import collect_submodules
-hiddenimports = collect_submodules("PIL")' > hooks/hook-pil.py
+          hiddenimports = collect_submodules("PIL")' > hooks/hook-pil.py
 
       - name: Build macOS executable
         run: |
