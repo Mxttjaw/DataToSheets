@@ -32,7 +32,7 @@ else:
 # Carica le variabili d'ambiente
 load_dotenv()
 
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "0.0.1"
 
 
 class BotApp(ttk.Frame):
