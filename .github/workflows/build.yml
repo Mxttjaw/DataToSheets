@@ -86,13 +86,14 @@ jobs:
           pip install pyinstaller
 
       - name: Build Windows executable
+        shell: cmd
         run: |
-          pyinstaller \
-            --onefile \
-            --name DataToSheets \
-            --icon=src/assets/icons/bot_icon.ico \
-            --add-data="src/assets/icons/bot_icon.ico:assets/icons" \
-            --noconsole \
+          pyinstaller ^
+            --onefile ^
+            --name DataToSheets ^
+            --icon=src/assets/icons/bot_icon.ico ^
+            --add-data="src/assets/icons/bot_icon.ico;assets/icons" ^
+            --noconsole ^
             src/bot.py
 
       - name: Upload Windows artifact
