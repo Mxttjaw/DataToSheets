@@ -315,6 +315,8 @@ class BotApp(ttk.Frame):
         """
         Inizializza il processo di aggiornamento.
         """
+        import tempfile
+         
         self._log_message("Avvio del processo di aggiornamento...")
         
         download_url = self._get_download_url()
@@ -377,19 +379,18 @@ class BotApp(ttk.Frame):
             return None
 
     def _get_download_url(self):
-        """
-        Genera l'URL di download garantendo il prefisso 'v' nella versione
-        """
+        """Genera l'URL di download garantendo il prefisso 'v' nella versione"""
         try:
-           
             latest_version = self._get_latest_version() 
             
-           
+            if not latest_version:
+                self._log_message("[ERRORE] Impossibile ottenere l'ultima versione")
+                return None
+                
             if not latest_version.startswith('v'):
                 latest_version = f'v{latest_version}'
                 self._log_message(f"[DEBUG] Aggiunto prefisso 'v' alla versione: {latest_version}")
             
-           
             system = platform.system()
             filename = {
                 "Windows": "DataToSheets-Windows.exe",
@@ -397,12 +398,9 @@ class BotApp(ttk.Frame):
                 "Linux": "DataToSheets-Linux"
             }.get(system, "DataToSheets-Linux")  
             
-            
             download_url = f"https://github.com/Mxttjaw/DataToSheets/releases/download/{latest_version}/{filename}"
             
-           
             self._log_message(f"[DEBUG] URL generato: {download_url}")
-            
             return download_url
 
         except Exception as e:
