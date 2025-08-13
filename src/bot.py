@@ -363,48 +363,38 @@ class BotApp(ttk.Frame):
             api_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest"
             response = requests.get(api_url, timeout=10)
             response.raise_for_status()
-            return response.json().get('tag_name', '').lstrip('v')
+            return response.json().get('tag_name', '')
         except Exception as e:
             self._log_message(f"Errore nel recupero dell'ultima versione: {str(e)}")
             return None
 
     def _get_download_url(self):
         """
-        Restituisce l'URL di download corretto per l'aggiornamento in base al sistema operativo.
-        Formato URL: https://github.com/[user]/[repo]/releases/download/[tag]/[filename]
+        Versione corretta che genera l'URL di download diretto
         """
         try:
-            # Ottieni l'ultima versione disponibile
-            latest_version = self._get_latest_version()  # Assicurati di avere questa funzione
-            if not latest_version:
-                self._log_message("Impossibile determinare l'ultima versione disponibile")
-                return None
-
-            # Costruisci la base dell'URL
-            repo_url = "https://github.com/Mxttjaw/DataToSheets/releases/download"
-            tag = latest_version.lstrip('v')  # Rimuove 'v' dal tag se presente
-
-            # Determina il nome del file in base all'OS e all'architettura
+            # Ottieni l'ultima versione (esempio - sostituisci con la tua logica)
+            latest_version = "v1.0.99-test-fix"  # Sostituisci con self._get_latest_version()
+            
+            # Determina il nome file in base all'OS
             system = platform.system()
-            machine = platform.machine().lower()
-
             if system == "Windows":
                 filename = "DataToSheets-Windows.exe"
             elif system == "Darwin":
                 filename = "DataToSheets-macOS"
-            else:  # Linux e altri
+            else:  # Linux
                 filename = "DataToSheets-Linux"
 
-            download_url = f"{repo_url}/{latest_version}/{filename}"
+            # Costruisci l'URL di download diretto
+            download_url = f"https://github.com/Mxttjaw/DataToSheets/releases/download/{latest_version}/{filename}"
             
-            # Debug (puoi rimuoverlo in produzione)
-            self._log_message(f"URL di download generato: {download_url}")
-            self._log_message(f"Sistema: {system}, Architettura: {machine}")
+            # Debug
+            self._log_message(f"[DEBUG] Tentativo download da: {download_url}")
             
             return download_url
 
         except Exception as e:
-            self._log_message(f"Errore nella generazione dell'URL di download: {str(e)}")
+            self._log_message(f"Errore generazione URL: {str(e)}")
             return None
 
     def launch_updater_script(self, new_exe_path):
