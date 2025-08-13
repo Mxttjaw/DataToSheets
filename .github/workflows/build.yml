@@ -95,7 +95,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Aggiunto per risolvere l'errore 403
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +112,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref }}
-          name: Release ${{ github.ref_name }} # Cambiato da release_name a name
+          name: Release ${{ github.ref_name }}
           body: |
             Auto-generated release for version ${{ github.ref_name }}
           files: |

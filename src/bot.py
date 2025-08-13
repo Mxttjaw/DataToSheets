@@ -32,7 +32,7 @@ else:
 # Carica le variabili d'ambiente
 load_dotenv()
 
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "0.9.9"
 
 
 class BotApp(ttk.Frame):
@@ -353,31 +353,58 @@ class BotApp(ttk.Frame):
             self._log_message(f"Errore durante il download o il lancio dell'updater: {e}")
             messagebox.showerror("Errore Aggiornamento", f"Non è stato possibile aggiornare il bot: {e}")
 
+
+
+    def _get_latest_version(self):
+        """
+        Ottiene l'ultima versione disponibile dall'API di GitHub
+        """
+        try:
+            api_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest"
+            response = requests.get(api_url, timeout=10)
+            response.raise_for_status()
+            return response.json().get('tag_name', '').lstrip('v')
+        except Exception as e:
+            self._log_message(f"Errore nel recupero dell'ultima versione: {str(e)}")
+            return None
+
     def _get_download_url(self):
-        """Restituisce l'URL di download corretto in base al sistema operativo."""
-        github_release_url = "https://github.com/Mxttjaw/DataToSheets/releases/latest/download"
-        
-        system = platform.system()
-        machine = platform.machine().lower()
-        
-        if system == "Windows":
-            if "64" in machine:
-                return f"{github_release_url}/DataToSheets-Windows-x86_64.exe"
-            else:
-                return f"{github_release_url}/DataToSheets-Windows-i386.exe"
-        elif system == "Darwin":
-            if "arm" in machine:
-                return f"{github_release_url}/DataToSheets-macOS-arm64"
-            else:
-                return f"{github_release_url}/DataToSheets-macOS-x86_64"
-        elif system == "Linux":
-            if "arm" in machine or "aarch" in machine:
-                return f"{github_release_url}/DataToSheets-Linux-arm64"
-            elif "64" in machine:
-                return f"{github_release_url}/DataToSheets-Linux-x86_64"
-            else:
-                return f"{github_release_url}/DataToSheets-Linux-i386"
-        else:
+        """
+        Restituisce l'URL di download corretto per l'aggiornamento in base al sistema operativo.
+        Formato URL: https://github.com/[user]/[repo]/releases/download/[tag]/[filename]
+        """
+        try:
+            # Ottieni l'ultima versione disponibile
+            latest_version = self._get_latest_version()  # Assicurati di avere questa funzione
+            if not latest_version:
+                self._log_message("Impossibile determinare l'ultima versione disponibile")
+                return None
+
+            # Costruisci la base dell'URL
+            repo_url = "https://github.com/Mxttjaw/DataToSheets/releases/download"
+            tag = latest_version.lstrip('v')  # Rimuove 'v' dal tag se presente
+
+            # Determina il nome del file in base all'OS e all'architettura
+            system = platform.system()
+            machine = platform.machine().lower()
+
+            if system == "Windows":
+                filename = "DataToSheets-Windows.exe"
+            elif system == "Darwin":
+                filename = "DataToSheets-macOS"
+            else:  # Linux e altri
+                filename = "DataToSheets-Linux"
+
+            download_url = f"{repo_url}/{latest_version}/{filename}"
+            
+            # Debug (puoi rimuoverlo in produzione)
+            self._log_message(f"URL di download generato: {download_url}")
+            self._log_message(f"Sistema: {system}, Architettura: {machine}")
+            
+            return download_url
+
+        except Exception as e:
+            self._log_message(f"Errore nella generazione dell'URL di download: {str(e)}")
             return None
 
     def launch_updater_script(self, new_exe_path):
