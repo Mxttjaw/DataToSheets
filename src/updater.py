@@ -20,7 +20,7 @@ class Updater:
         self.log = log_callback if log_callback else print
         self.github_repo_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases"
 
-        # Costruiamo più "candidati" per il path dell'eseguibile e scegliamo quello che esiste.
+        # Costruiamo piÃ¹ "candidati" per il path dell'eseguibile e scegliamo quello che esiste.
         cand_exec = None
         cand_argv = None
         try:
@@ -110,7 +110,7 @@ class Updater:
                 if on_update_available:
                     on_update_available()
             else:
-                self.log("Il bot è già aggiornato all'ultima versione.")
+                self.log("Il bot Ã¨ giÃ  aggiornato all'ultima versione.")
         except requests.exceptions.RequestException as e:
             self.log(f"Errore durante la verifica aggiornamenti: {e}")
         except Exception as e:
@@ -118,8 +118,8 @@ class Updater:
 
     def update_app(self):
         """
-        Scarica l'asset dal release più recente e avvia lo script helper.
-        Nota: questa funzione può essere chiamata anche da thread; terminare
+        Scarica l'asset dal release piÃ¹ recente e avvia lo script helper.
+        Nota: questa funzione puÃ² essere chiamata anche da thread; terminare
         il processo principale viene effettuato con os._exit(0) dopo aver avviato l'helper.
         """
         self.log("Avvio del processo di aggiornamento...")
@@ -257,56 +257,66 @@ exit 0
                 messagebox.showerror("Errore Aggiornamento", f"Errore avviando lo script helper: {e}")
                 return
 
-            # Termina immediatamente il processo principale (affinché il file venga liberato)
-            self.log("Helper avviato — esco immediatamente per permettere l'aggiornamento.")
+            # Termina immediatamente il processo principale (affinchÃ© il file venga liberato)
+            self.log("Helper avviato â€” esco immediatamente per permettere l'aggiornamento.")
             os._exit(0)
 
         elif current_system == 'Windows':
             self.log("Creazione del file batch helper per Windows.")
-            logpath = os.path.join(tempfile.gettempdir(), f"update_helper_{ts}.log").replace('\\', '\\\\')
+
+            ts = int(time.time())
+            logpath = os.path.join(tempfile.gettempdir(), f"update_helper_{ts}.log")
+            marker_path = os.path.join(tempfile.gettempdir(), f"restart_marker_{ts}.txt")
+            
             script_content = f"""@echo off
-setlocal
-set LOG={logpath}
-echo helper start: %date% %time% PID %1 OLD_PATH=%2 NEW_PATH=%3 >> "%LOG%"
-set OLD_PID=%1
-set OLD_PATH=%2
-set NEW_PATH=%3
+        setlocal enabledelayedexpansion
+        set LOG={logpath}
+        echo helper start: %date% %time% >> "%LOG%"
 
-:waitloop
-timeout /t 1 > nul
-tasklist /FI "PID eq %OLD_PID%" | findstr /I "%OLD_PID%" > nul
-if %ERRORLEVEL%==0 goto waitloop
+        set OLD_PATH=%1
+        set NEW_PATH=%2
+        set MARKER={marker_path}
 
-REM Retry move
-for /L %%i in (1,1,5) do (
-    move /Y "%NEW_PATH%" "%OLD_PATH%" >> "%LOG%" 2>&1 && goto moved || timeout /t 1 > nul
-)
-echo Move failed after retries >> "%LOG%"
-exit /b 1
+        REM Aspetta che il vecchio processo sia morto
+        :waitloop
+        timeout /t 1 > nul
+        tasklist /FI "IMAGENAME eq {os.path.basename(self.current_executable_path)}" | find /I "{os.path.basename(self.current_executable_path)}" > nul
+        if %ERRORLEVEL%==0 goto waitloop
 
-:moved
-start "" "%OLD_PATH%" %*
-exit /b 0
-"""
+        echo Processo terminato, attendo 3 secondi extra >> "%LOG%"
+        timeout /t 3 > nul
+
+        echo Copio nuovo eseguibile su percorso definitivo >> "%LOG%"
+        copy /Y "%NEW_PATH%" "%OLD_PATH%" >> "%LOG%" 2>&1
+        if %ERRORLEVEL% NEQ 0 (
+            echo ERRORE: copia fallita >> "%LOG%"
+            exit /b 1
+        )
+
+        echo Copia riuscita. Creo marker di riavvio >> "%LOG%"
+        echo restart > "%MARKER%"
+
+        echo Pianifico riavvio con schtasks >> "%LOG%"
+        schtasks /Create /SC ONCE /TN "RestartDataToSheets" /TR "\\"%OLD_PATH%\\"" /ST 00:00 /RL HIGHEST /F >> "%LOG%" 2>&1
+        schtasks /Run /TN "RestartDataToSheets" >> "%LOG%" 2>&1
+
+        exit /b 0
+        """
+
             script_path = os.path.join(tempfile.gettempdir(), f"update_helper_{ts}.bat")
             with open(script_path, 'w', newline='\r\n') as f:
                 f.write(script_content)
 
-            try:
-                subprocess.Popen(
-                    [script_path, str(current_pid), self.current_executable_path, new_executable_path] + sys.argv[1:],
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-                    close_fds=True
-                )
-            except Exception as e:
-                self.log(f"Errore avviando il batch helper: {e}")
-                messagebox.showerror("Errore Aggiornamento", f"Errore avviando il batch helper: {e}")
-                return
+            subprocess.Popen(
+                ["cmd", "/c", "start", "/min", script_path, self.current_executable_path, new_executable_path],
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                close_fds=True
+            )
 
-            self.log("Helper batch avviato — esco immediatamente per permettere l'aggiornamento.")
+            self.log("Helper batch avviato â€” esco per permettere l'aggiornamento.")
             os._exit(0)
 
         else:
             self.log(f"Sistema operativo non supportato: {current_system}")
-            messagebox.showerror("Errore Aggiornamento", f"Il sistema operativo {current_system} non è supportato.")
+            messagebox.showerror("Errore Aggiornamento", f"Il sistema operativo {current_system} non Ã¨ supportato.")
             return
