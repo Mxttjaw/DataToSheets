@@ -34,7 +34,7 @@ else:
 
 load_dotenv()
 
-CURRENT_VERSION = "1.0.2"
+CURRENT_VERSION = "1.0.4"
 
 class BotApp(ttk.Frame):
     """
@@ -59,10 +59,12 @@ class BotApp(ttk.Frame):
         self.running_thread = None
         self.headers_set = False # Variabile di stato per la gestione delle intestazioni
 
+        # Costruiamo la GUI PRIMA di creare l'Updater (per avere log_area pronto)
+        self.create_gui_elements()
+
         # Crea un'istanza della classe Updater e passa il metodo di log
         self.updater = Updater(current_version=CURRENT_VERSION, log_callback=self._log_message)
 
-        self.create_gui_elements()
         self._create_user_config_directory()
         self.tutorial_state_var.set(self._load_config_boolean('SETTINGS', 'tutorial_shown', False))
         
@@ -80,18 +82,20 @@ class BotApp(ttk.Frame):
     def create_gui_elements(self):
         """Costruisce tutti i widget dell'interfaccia utente."""
         self.master.title(f"Bot Email - Gestione Dati (v{CURRENT_VERSION})")
-        self.master.geometry("600x400")
+        self.master.geometry("700x460")
         self.master.resizable(True, True)
         
-        self.top_menu_frame = ttk.Frame(self, height=30)
-        self.top_menu_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
-        
+        # Top frame: menu + status
+        self.top_menu_frame = ttk.Frame(self, height=36)
+        self.top_menu_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=8)
+
         self.main_content_frame = ttk.Frame(self)
         self.main_content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
         self.main_content_frame.grid_rowconfigure(1, weight=1)
         self.main_content_frame.grid_columnconfigure(0, weight=1)
 
         self._create_dropdown_menu()
+        self._create_status_area()
         self._create_file_selection_area()
         self._create_log_area()
         self._create_action_buttons()
@@ -119,6 +123,19 @@ class BotApp(ttk.Frame):
         
         menu_btn.config(command=show_menu)
 
+    def _create_status_area(self):
+        """Area di stato a destra del top frame: versione e stato aggiornamenti."""
+        status_frame = ttk.Frame(self.top_menu_frame)
+        status_frame.pack(side=tk.RIGHT)
+
+        self.status_label = ttk.Label(status_frame, text=f"v{CURRENT_VERSION}", bootstyle="muted")
+        self.status_label.pack(side=tk.RIGHT, padx=(8,0))
+
+        # Progressbar nascosta che appare durante download/aggiornamento
+        self.update_progress = ttk.Progressbar(status_frame, length=180, mode='indeterminate')
+        self.update_progress.pack(side=tk.RIGHT, padx=(0,8))
+        self.update_progress.pack_forget()
+
     def _create_file_selection_area(self):
         """Crea il frame per la selezione del file e i campi per foglio di calcolo/lavoro."""
         file_frame = ttk.LabelFrame(self.main_content_frame, text="Configurazione Dati e Fogli", padding=(15, 10))
@@ -128,25 +145,25 @@ class BotApp(ttk.Frame):
         path_frame.pack(fill=tk.X, pady=(0, 5))
         
         ttk.Label(path_frame, text="File Dati:").pack(side=tk.LEFT)
-        file_entry = ttk.Entry(path_frame, textvariable=self.file_path_var, state='readonly')
-        file_entry.pack(side=tk.LEFT, padx=(5, 10), fill=tk.X, expand=True)
+        self.file_entry = ttk.Entry(path_frame, textvariable=self.file_path_var, state='readonly')
+        self.file_entry.pack(side=tk.LEFT, padx=(5, 10), fill=tk.X, expand=True)
         
-        browse_button = ttk.Button(path_frame, text="Scegli File", command=self.select_file, bootstyle="primary")
-        browse_button.pack(side=tk.RIGHT)
+        self.browse_button = ttk.Button(path_frame, text="Scegli File", command=self.select_file, bootstyle="primary")
+        self.browse_button.pack(side=tk.RIGHT)
         
         ss_frame = ttk.Frame(file_frame)
         ss_frame.pack(fill=tk.X, pady=(5, 5))
         
         ttk.Label(ss_frame, text="Nome Foglio di Calcolo:").pack(side=tk.LEFT)
-        ss_entry = ttk.Entry(ss_frame, textvariable=self.spreadsheet_name_var)
-        ss_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        self.ss_entry = ttk.Entry(ss_frame, textvariable=self.spreadsheet_name_var)
+        self.ss_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
         
         ws_frame = ttk.Frame(file_frame)
         ws_frame.pack(fill=tk.X, pady=(5, 5))
         
         ttk.Label(ws_frame, text="Nome Foglio di Lavoro:").pack(side=tk.LEFT)
-        ws_entry = ttk.Entry(ws_frame, textvariable=self.worksheet_name_var)
-        ws_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        self.ws_entry = ttk.Entry(ws_frame, textvariable=self.worksheet_name_var)
+        self.ws_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
 
     def _create_log_area(self):
         """Crea il frame per i messaggi di log."""
@@ -167,24 +184,27 @@ class BotApp(ttk.Frame):
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
 
-        preview_button = ttk.Button(btn_frame, text="Anteprima Dati", command=self.show_data_preview, bootstyle="info")
-        preview_button.grid(row=0, column=0, padx=(0, 5), sticky=tk.E)
+        self.preview_button = ttk.Button(btn_frame, text="Anteprima Dati", command=self.show_data_preview, bootstyle="info")
+        self.preview_button.grid(row=0, column=0, padx=(0, 5), sticky=tk.E)
 
-        run_button = ttk.Button(btn_frame, text="Avvia Bot", command=self.start_bot_thread, bootstyle="success")
-        run_button.grid(row=0, column=1, padx=(5, 0), sticky=tk.W)
+        self.run_button = ttk.Button(btn_frame, text="Avvia Bot", command=self.start_bot_thread, bootstyle="success")
+        self.run_button.grid(row=0, column=1, padx=(5, 0), sticky=tk.W)
 
-        self.update_btn = ttk.Button(self.main_content_frame, text="Aggiorna Bot", command=lambda: Thread(target=self.updater.update_app, daemon=True).start(), bootstyle="warning")
+        self.update_btn = ttk.Button(self.main_content_frame, text="Aggiorna Bot", command=self.start_update, bootstyle="warning")
         self.update_btn.grid(row=3, column=0, pady=10, sticky=tk.EW)
         self.update_btn.grid_remove() 
         
         self.update_available.trace_add('write', self.handle_update_button_visibility)
-    
+
     def handle_update_button_visibility(self, *args):
         """Mostra o nasconde il pulsante di aggiornamento in base allo stato."""
         if self.update_available.get():
+            # Mostra pulsante e aggiorna la status bar
             self.update_btn.grid()
+            self.status_label.config(text="Aggiornamento disponibile")
         else:
             self.update_btn.grid_remove()
+            self.status_label.config(text=f"v{CURRENT_VERSION}")
 
     def start_bot_thread(self):
         """Avvia l'esecuzione del bot in un thread separato per non bloccare la GUI."""
@@ -241,13 +261,24 @@ class BotApp(ttk.Frame):
             self._log_message("Nessun percorso file salvato. Seleziona il file dei dati.")
 
     def _log_message(self, message):
-        """Aggiorna la Textbox della GUI con un messaggio e un timestamp."""
+        """Aggiorna la Textbox della GUI con un messaggio e un timestamp (fallback su stdout)."""
         timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        self.log_area.configure(state='normal')
-        self.log_area.insert(tk.END, f"{timestamp} {message}\n")
-        self.log_area.configure(state='disabled')
-        self.log_area.see(tk.END)
-    
+        full = f"{timestamp} {message}\n"
+        if not hasattr(self, 'log_area') or self.log_area is None:
+            print(full, end='')
+            return
+
+        try:
+            self.log_area.configure(state='normal')
+            self.log_area.insert(tk.END, full)
+            self.log_area.configure(state='disabled')
+            self.log_area.see(tk.END)
+        except Exception:
+            try:
+                print(full, end='')
+            except Exception:
+                pass
+
     # --- Metodi per la gestione della configurazione (configparser) ---
 
     def _load_config(self):
@@ -550,6 +581,56 @@ class BotApp(ttk.Frame):
         self._log_message("Processo bot completato.")
         messagebox.showinfo("Bot", "Operazione completata con successo.")
 
+    # --- Nuove funzioni UI/UX: aggiornamento in place con progress bar e disabilitazione UI ---
+    def start_update(self):
+        """Mostra conferma all'utente e avvia l'aggiornamento mostrando progress."""
+        if not messagebox.askyesno("Aggiornamento", "È stato trovato un aggiornamento. Vuoi installarlo ora? L'app si chiuderà." ):
+            return
+
+        # Disabilita i controlli principali per evitare azioni concorrenti
+        self.disable_ui_for_update()
+
+        # Mostra progress e testo
+        self.status_label.config(text="Download e installazione in corso...")
+        self.update_progress.pack(side=tk.RIGHT, padx=(0,8))
+        self.update_progress.start(10)
+
+        # Avvia l'update in thread (Updater terminerà il processo se tutto ok)
+        Thread(target=self._run_update_thread, daemon=True).start()
+
+    def _run_update_thread(self):
+        try:
+            self.updater.update_app()
+        except Exception as e:
+            # Se rientra qui vuol dire che l'update ha fallito senza terminare il processo
+            self._log_message(f"Errore aggiornamento: {e}")
+            messagebox.showerror("Errore Aggiornamento", f"Errore durante l'aggiornamento: {e}")
+            # ripristina UI
+            self.update_progress.stop()
+            self.update_progress.pack_forget()
+            self.enable_ui_after_update()
+
+    def disable_ui_for_update(self):
+        try:
+            self.run_button.configure(state='disabled')
+            self.preview_button.configure(state='disabled')
+            self.browse_button.configure(state='disabled')
+            self.ss_entry.configure(state='disabled')
+            self.ws_entry.configure(state='disabled')
+        except Exception:
+            pass
+
+    def enable_ui_after_update(self):
+        try:
+            self.run_button.configure(state='normal')
+            self.preview_button.configure(state='normal')
+            self.browse_button.configure(state='normal')
+            self.ss_entry.configure(state='normal')
+            self.ws_entry.configure(state='normal')
+            self.status_label.config(text=f"v{CURRENT_VERSION}")
+        except Exception:
+            pass
+
 # --- Punto di Ingresso dell'applicazione ---
 if __name__ == "__main__":
     try:
@@ -560,4 +641,3 @@ if __name__ == "__main__":
         import traceback
         print(f"Errore critico: {e}")
         traceback.print_exc()
-
