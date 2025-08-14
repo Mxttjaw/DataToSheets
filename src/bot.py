@@ -23,23 +23,23 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from dotenv import load_dotenv
 
+# Importa la nuova classe Updater (presupponendo che il file updater.py esista)
+from updater import Updater
+
 # --- Configurazione e Dipendenze ---
-# Imposta il percorso di base come la directory dell'eseguibile per trovare i file di configurazione.
 if getattr(sys, 'frozen', False):
     os.chdir(os.path.dirname(sys.executable))
 else:
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# Carica le variabili d'ambiente
 load_dotenv()
 
-CURRENT_VERSION = "0.9.9"
-
+CURRENT_VERSION = "1.0.2"
 
 class BotApp(ttk.Frame):
     """
     Classe principale dell'applicazione, gestisce l'intera interfaccia utente
-    e la logica del bot. Ora supporta la gestione di file utente-specifici.
+    e la logica del bot.
     """
 
     def __init__(self, master=None):
@@ -57,12 +57,12 @@ class BotApp(ttk.Frame):
         self.tutorial_state_var = tk.BooleanVar()
         self.update_available = tk.BooleanVar(value=False)
         self.running_thread = None
+        self.headers_set = False # Variabile di stato per la gestione delle intestazioni
 
-        # FIX: Ho spostato la creazione della GUI come prima cosa in __init__
-        # per evitare che qualsiasi chiamata a _log_message fallisca.
+        # Crea un'istanza della classe Updater e passa il metodo di log
+        self.updater = Updater(current_version=CURRENT_VERSION, log_callback=self._log_message)
+
         self.create_gui_elements()
-        
-        # Le seguenti funzioni ora vengono chiamate solo dopo che la GUI è pronta.
         self._create_user_config_directory()
         self.tutorial_state_var.set(self._load_config_boolean('SETTINGS', 'tutorial_shown', False))
         
@@ -72,7 +72,8 @@ class BotApp(ttk.Frame):
             self.master.after(500, self.show_tutorial_window)
             self._save_config_value('SETTINGS', 'tutorial_shown', True)
 
-        Thread(target=self.check_for_updates, daemon=True).start()
+        # Avvia la verifica degli aggiornamenti in un thread separato
+        Thread(target=lambda: self.updater.check_for_updates(on_update_available=lambda: self.update_available.set(True)), daemon=True).start()
 
     # --- Metodi per la gestione della GUI ---
 
@@ -104,7 +105,8 @@ class BotApp(ttk.Frame):
         menu.add_command(label="Avvia Bot", command=self.start_bot_thread)
         menu.add_command(label="Opzioni", command=self.open_options_window)
         menu.add_command(label="Tutorial", command=self.show_tutorial_window)
-        menu.add_command(label="Controlla Aggiornamenti", command=lambda: Thread(target=self.check_for_updates, daemon=True).start())
+        # Sostituisce la vecchia logica con la chiamata all'Updater
+        menu.add_command(label="Controlla Aggiornamenti", command=lambda: Thread(target=lambda: self.updater.check_for_updates(on_update_available=lambda: self.update_available.set(True)), daemon=True).start())
         menu.add_separator()
         menu.add_command(label="Esci", command=self.master.quit)
         
@@ -171,7 +173,7 @@ class BotApp(ttk.Frame):
         run_button = ttk.Button(btn_frame, text="Avvia Bot", command=self.start_bot_thread, bootstyle="success")
         run_button.grid(row=0, column=1, padx=(5, 0), sticky=tk.W)
 
-        self.update_btn = ttk.Button(self.main_content_frame, text="Aggiorna Bot", command=self.update_bot, bootstyle="warning")
+        self.update_btn = ttk.Button(self.main_content_frame, text="Aggiorna Bot", command=lambda: Thread(target=self.updater.update_app, daemon=True).start(), bootstyle="warning")
         self.update_btn.grid(row=3, column=0, pady=10, sticky=tk.EW)
         self.update_btn.grid_remove() 
         
@@ -211,7 +213,6 @@ class BotApp(ttk.Frame):
             os.makedirs(self.user_data_path)
             self._log_message(f"Creata cartella di configurazione utente in: {self.user_data_path}")
 
-        # Crea un file .env di esempio
         env_path = os.path.join(self.user_data_path, '.env')
         if not os.path.exists(env_path):
             with open(env_path, 'w') as f:
@@ -280,524 +281,138 @@ class BotApp(ttk.Frame):
         """Carica un booleano da un file di configurazione."""
         config = self._load_config()
         return config.getboolean(section, key, fallback=fallback)
-
-    # --- Logica di Aggiornamento ---
-
-    def check_for_updates(self):
-        """
-        Controlla se è disponibile un aggiornamento del bot.
-        """
-        self._log_message("Controllo aggiornamenti in corso...")
-        github_repo_url = "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest"
         
-        try:
-            response = requests.get(github_repo_url, timeout=10)
-            response.raise_for_status() 
-            latest_release = response.json()
-            latest_version = latest_release.get("tag_name", "v0.0.0").lstrip('v')
-            
-            if latest_version > CURRENT_VERSION:
-                self.update_available.set(True)
-                self._log_message(f"Aggiornamento disponibile! Versione attuale: {CURRENT_VERSION}, ultima versione: {latest_version}.")
-                messagebox.showinfo("Aggiornamento Disponibile", 
-                    f"Una nuova versione del bot ({latest_version}) è disponibile per il download.\n\n"
-                    "Clicca su 'Aggiorna Bot' per installare la nuova versione.")
-            else:
-                self.update_available.set(False)
-                self._log_message("Il bot è già aggiornato all'ultima versione.")
+    def _create_options_window(self, options_window):
+        """Costruisce la finestra delle opzioni."""
+        options_window.title("Opzioni")
+        options_window.geometry("400x200")
+        options_window.grab_set()
+
+        options_frame = ttk.Frame(options_window, padding=20)
+        options_frame.pack(fill=BOTH, expand=True)
+
+        # Temi
+        temi = self.master.style.theme_names()
+        theme_var = tk.StringVar(value=self.master.style.theme_use())
         
-        except requests.exceptions.RequestException as e:
-            self._log_message(f"Errore durante il controllo degli aggiornamenti: {e}")
-            self.update_available.set(False)
+        ttk.Label(options_frame, text="Seleziona tema:").pack(anchor=W)
+        theme_menu = ttk.OptionMenu(options_frame, theme_var, theme_var.get(), *temi)
+        theme_menu.pack(fill=X, pady=(0, 10))
 
+        def on_theme_change(*args):
+            """Cambia il tema dell'applicazione."""
+            nuovo_tema = theme_var.get()
+            self.master.style.theme_use(nuovo_tema)
+            self._save_config_value('SETTINGS', 'theme', nuovo_tema)
 
+        theme_var.trace_add('write', on_theme_change)
 
-    def update_bot(self):
-        """Inizializza il processo di aggiornamento"""
-        self._log_message("Avvio del processo di aggiornamento...")
+        # Opzione svuota file
+        svuota_frame = ttk.Frame(options_frame)
+        svuota_frame.pack(fill=X, pady=(0, 10))
+        ttk.Checkbutton(svuota_frame, text="Svuota il file di testo dopo l'invio", variable=self.svuota_file_var).pack(side=LEFT)
         
-        try:
-            # Il modulo tempfile è già importato all'inizio del file, quindi questo test non serve.
-            # Rimuovere questo blocco risolve l'errore 'name 'tempfile' is not defined'.
+        def on_svuota_change(*args):
+            """Salva lo stato della checkbox."""
+            self._save_config_value('SETTINGS', 'svuota_file', self.svuota_file_var.get())
             
-            download_url = self._get_download_url()
-            if not download_url:
-                messagebox.showerror("Errore Aggiornamento", "URL di download non trovato per il tuo sistema operativo.")
-                return
-
-            self._log_message(f"Download in corso da: {download_url}")
-            response = requests.get(download_url, stream=True, timeout=30)
-            response.raise_for_status()
-            
-            temp_dir = tempfile.gettempdir()
-            self._log_message(f"Directory temporanea: {temp_dir}")
-            
-            if platform.system() == "Windows":
-                new_exe_name = "DataToSheets_new.exe"
-            else:
-                new_exe_name = "DataToSheets_new"
-                
-            new_exe_path = os.path.join(temp_dir, new_exe_name)
-            
-            with open(new_exe_path, "wb") as f:
-                shutil.copyfileobj(response.raw, f)
-            
-            self._log_message("Nuova versione scaricata con successo.")
-            
-
-            if platform.system() != "Windows":
-                os.chmod(new_exe_path, 0o755)
-            
-            self.launch_updater_script(new_exe_path)
-            self.master.destroy() 
+        self.svuota_file_var.trace_add('write', on_svuota_change)
         
-        except Exception as e:
-            self._log_message(f"Errore durante il download o il lancio dell'updater: {str(e)}")
-            messagebox.showerror("Errore Aggiornamento", f"Non è stato possibile aggiornare il bot: {str(e)}")
-            
-    def _get_latest_version(self):
-        """Ottiene l'ultima versione esatta da GitHub"""
-        try:
-            response = requests.get(
-                "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest",
-                timeout=10
-            )
-            response.raise_for_status()
-            return response.json().get('tag_name', '')
-        except Exception as e:
-            self._log_message(f"Errore recupero versione: {e}")
-            return None
+        ttk.Button(options_frame, text="Chiudi", command=options_window.destroy, bootstyle="info").pack(pady=10)
 
-
-    def _get_download_url(self):
-        """
-        Genera l'URL di download con la versione esatta.
-        NOTA: Ho corretto la logica per usare il tag della release esattamente come viene fornito da GitHub,
-        senza pulire la 'v' iniziale, in quanto l'URL di download lo richiede.
-        """
-        try:
-            response = requests.get(
-                "https://api.github.com/repos/Mxttjaw/DataToSheets/releases/latest",
-                timeout=10
-            )
-            response.raise_for_status()
-            latest_release = response.json()
-            latest_tag = latest_release.get('tag_name', '')
-            
-            if not latest_tag:
-                self._log_message("[ERRORE] Impossibile ottenere il tag di release da GitHub.")
-                return None
-            
-            self._log_message(f"[DEBUG] Tentativo download da: {latest_tag}")
-            
-            system = platform.system()
-            filename = {
-                "Windows": "DataToSheets-Windows.exe",
-                "Darwin": "DataToSheets-macOS",
-                "Linux": "DataToSheets-Linux"
-            }.get(system)
-
-            if not filename:
-                self._log_message(f"[ERRORE] Sistema operativo non supportato: {system}")
-                return None
-                
-            download_url = f"https://github.com/Mxttjaw/DataToSheets/releases/download/{latest_tag}/{filename}"
-            return download_url
-        
-        except Exception as e:
-            self._log_message(f"[ERRORE] Generazione URL fallita: {str(e)}")
-            return None
-
-    def launch_updater_script(self, new_exe_path):
-        """ Crea e avvia lo script temporaneo che si occuperà di sostituire il file. """
-        current_exe_path = sys.executable
-        temp_dir = tempfile.gettempdir()
-        if platform.system() == "Windows":
-            updater_script = os.path.join(temp_dir, "DataToSheets_updater.bat")
-            script_content = f""" @echo off timeout /t 3 /nobreak >nul taskkill /F /PID {os.getpid()} >nul 2>&1 move /Y "{new_exe_path}" "{current_exe_path}" >nul start "" "{current_exe_path}" del "%~f0" """
-        else: # macOS e Linux
-            updater_script = os.path.join(temp_dir, "DataToSheets_updater.sh")
-            script_content = f"""#!/bin/bash sleep 3 kill -9 {os.getpid()} >/dev/null 2>&1 mv -f "{new_exe_path}" "{current_exe_path}" >/dev/null 2>&1 chmod +x "{current_exe_path}" nohup "{current_exe_path}" >/dev/null 2>&1 & rm -f "$0" """
-        try:
-            with open(updater_script, "w") as f:
-                f.write(script_content)
-            if platform.system() != "Windows":
-                os.chmod(updater_script, 0o755)
-            # Avvia lo script di aggiornamento
-            if platform.system() == "Windows":
-                subprocess.Popen([updater_script], creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                subprocess.Popen([updater_script], start_new_session=True)
-        except Exception as e:
-            self._log_message(f"Errore durante la creazione dello script di aggiornamento: {e}")
-            messagebox.showerror("Errore Aggiornamento", f"Errore durante l'avvio del processo di aggiornamento: {e}")
-    # --- Metodi per la gestione dei file e dell'interfaccia utente ---
+    def open_options_window(self):
+        """Apre la finestra delle opzioni."""
+        options_window = tk.Toplevel(self.master)
+        self._create_options_window(options_window)
     
     def show_tutorial_window(self):
-        """Mostra una finestra di tutorial con le istruzioni per la configurazione."""
+        """Apre la finestra del tutorial."""
         tutorial_window = tk.Toplevel(self.master)
-        tutorial_window.title("Tutorial: Configurazione Bot")
-        tutorial_window.geometry("700x500")
-        tutorial_window.transient(self.master)
+        tutorial_window.title("Tutorial")
+        tutorial_window.geometry("500x300")
+        tutorial_window.resizable(False, False)
         tutorial_window.grab_set()
 
         tutorial_frame = ttk.Frame(tutorial_window, padding=20)
-        tutorial_frame.pack(fill=tk.BOTH, expand=True)
-        
-        tutorial_text = tk.Text(tutorial_frame, wrap=tk.WORD, font=("Helvetica", 10), relief=tk.FLAT, borderwidth=0)
-        tutorial_text.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        tutorial_text.insert(tk.END, "Benvenuto nel tutorial di configurazione!\n\n", ("bold"))
-        tutorial_text.insert(tk.END, "Per garantire che ogni utente abbia la propria configurazione, il bot ora salva i file in una cartella dedicata del tuo sistema. L'eseguibile, invece, può essere posizionato dove preferisci.\n\n")
+        tutorial_frame.pack(fill=BOTH, expand=True)
 
-        tutorial_text.insert(tk.END, "Passo 1: Abilitare l'API di Google Sheets\n", ("bold"))
-        tutorial_text.insert(tk.END, "Vai su Google Cloud Console (https://console.cloud.google.com/) e assicurati di essere nel progetto corretto. Cerca 'Google Sheets API' e abilitala.\n\n")
-
-        tutorial_text.insert(tk.END, "Passo 2: Creare un account di servizio\n", ("bold"))
-        tutorial_text.insert(tk.END, "1. Sempre nella Cloud Console, vai su 'IAM e Amministrazione' -> 'Account di servizio'.\n")
-        tutorial_text.insert(tk.END, "2. Clicca su 'Crea account di servizio'.\n")
-        tutorial_text.insert(tk.END, "3. Assegna un nome (es. 'bot-sheets-service').\n")
-        tutorial_text.insert(tk.END, "4. Concedi i permessi necessari (es. 'Editor').\n\n")
-
-        tutorial_text.insert(tk.END, "Passo 3: Scaricare la chiave privata\n", ("bold"))
-        tutorial_text.insert(tk.END, "1. Clicca sul nome dell'account di servizio appena creato.\n")
-        tutorial_text.insert(tk.END, "2. Vai alla scheda 'Chiavi' e clicca su 'Aggiungi chiave' -> 'Crea nuova chiave'.\n")
-        tutorial_text.insert(tk.END, "3. Scegli 'JSON' come tipo di chiave. Il file verrà scaricato automaticamente.\n\n")
-
-        tutorial_text.insert(tk.END, "Passo 4: Caricare il file delle credenziali\n", ("bold"))
-        tutorial_text.insert(tk.END, "Ora clicca sul pulsante 'Seleziona File Credenziali' qui sotto per caricare il file JSON appena scaricato. Il bot lo rinominerà in 'credentials.json' e lo posizionerà nella cartella corretta:\n")
-        tutorial_text.insert(tk.END, f"{self.user_data_path}\n\n", ("bold"))
-
-        tutorial_text.insert(tk.END, "Passo 5: Condividere il foglio di calcolo\n", ("bold"))
-        tutorial_text.insert(tk.END, "Apri il tuo foglio di Google Sheets e clicca su 'Condividi'. Incolla l'indirizzo email dell'account di servizio (lo trovi nel file JSON) e concedi il permesso 'Editor'.\n")
-        tutorial_text.configure(state='disabled')
-        
-        bottom_frame = ttk.Frame(tutorial_window)
-        bottom_frame.pack(pady=(0, 10))
-        
-        creds_btn = ttk.Button(bottom_frame, text="Seleziona File Credenziali", command=self.handle_credentials_file, bootstyle="success")
-        creds_btn.pack(side=tk.LEFT, padx=(0, 20))
-        
-        close_btn = ttk.Button(bottom_frame, text="Chiudi", command=lambda: tutorial_window.destroy(), bootstyle="primary")
-        close_btn.pack(side=tk.LEFT)
-        
-    def handle_credentials_file(self):
-        """Permette all'utente di selezionare il file JSON e lo sposta/rinomina."""
-        source_path = filedialog.askopenfilename(
-            title="Seleziona il file 'credentials.json' appena scaricato",
-            filetypes=[("File JSON", "*.json")]
+        tutorial_text = (
+            "Benvenuto nel Bot per la gestione dei dati su Google Sheets!\n\n"
+            "Questo bot ti aiuta a estrarre i dati da un file di testo e a caricarli "
+            "automaticamente su un foglio di calcolo Google Sheets.\n\n"
+            "Passaggi:\n"
+            "1. Clicca su 'Scegli File' per selezionare il file di testo contenente i dati.\n"
+            "2. Inserisci il nome del Foglio di Calcolo e del Foglio di Lavoro.\n"
+            "3. Clicca su 'Anteprima Dati' per vedere cosa verrà inviato.\n"
+            "4. Clicca su 'Avvia Bot' per caricare i dati su Google Sheets.\n"
+            "5. Nelle 'Opzioni' puoi cambiare il tema e attivare lo svuotamento automatico del file.\n\n"
+            "Assicurati di avere il file 'credentials.json' e il file '.env' configurati correttamente."
         )
-        if not source_path:
-            return
-
-        destination_path = os.path.join(self.user_data_path, "credentials.json")
         
+        ttk.Label(tutorial_frame, text=tutorial_text, justify=LEFT, wraplength=450).pack(fill=BOTH, expand=True)
+        ttk.Button(tutorial_frame, text="Chiudi", command=tutorial_window.destroy, bootstyle="info").pack(pady=10)
+
+    def connect_to_sheets(self):
+        """Connessione a Google Sheets tramite gspread."""
         try:
-            shutil.copyfile(source_path, destination_path)
-            self._log_message(f"File credenziali copiato e rinominato con successo in: {destination_path}")
-            messagebox.showinfo("Successo", f"File 'credentials.json' configurato correttamente! Ora puoi condividere il tuo foglio di calcolo con l'indirizzo email di servizio per completare la configurazione. Lo trovi in: {self.user_data_path}")
+            creds_path = os.path.join(self.user_data_path, os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json"))
+            if not os.path.exists(creds_path):
+                self._log_message(f"ERRORE: File di credenziali non trovato a: {creds_path}")
+                messagebox.showerror("Errore Autenticazione", "File di credenziali 'credentials.json' non trovato.")
+                return None
+                
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            creds = service_account.Credentials.from_service_account_file(creds_path, scopes=scopes)
+            return gspread.authorize(creds)
         except Exception as e:
-            self._log_message(f"Errore durante la gestione del file credenziali: {e}")
-            messagebox.showerror("Errore", f"Errore durante la gestione del file: {e}. Controlla i permessi della cartella.")
-    
+            self._log_message(f"Errore di connessione a Google Sheets: {e}")
+            messagebox.showerror("Errore", f"Impossibile connettersi a Google Sheets: {e}")
+            return None
+
     def select_file(self):
-        """Apre una finestra di dialogo per selezionare il file di testo e lo salva."""
+        """Permette all'utente di selezionare un file e salva il percorso."""
         file_path = filedialog.askopenfilename(
-            title="Seleziona il file dei dati",
-            filetypes=[("File di testo", "*.txt")]
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
         )
         if file_path:
             self.file_path_var.set(file_path)
-            self._log_message(f"File selezionato: {file_path}")
             self._save_config_value('PATHS', 'dati_emails_path', file_path)
-
-    def show_data_preview(self):
-        """Mostra un'anteprima dei dati estratti dal file in una nuova finestra."""
-        file_path = self.file_path_var.get()
-        if not file_path or not os.path.exists(file_path):
-            messagebox.showwarning("Attenzione", "Seleziona un file valido prima di visualizzare l'anteprima.")
-            return
-
-        dati_emails = self.processa_file_testo(file_path)
-        if not dati_emails:
-            messagebox.showinfo("Nessun Dato", "Nessun dato valido trovato nel file per l'anteprima.")
-            return
-
-        preview_window = tk.Toplevel(self.master)
-        preview_window.title("Anteprima Dati")
-        preview_window.geometry("500x300")
-        preview_window.transient(self.master)
-
-        text_area = tk.Text(preview_window, wrap=tk.WORD)
-        text_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        for riga in dati_emails:
-            text_area.insert(tk.END, " | ".join(riga) + "\n")
-            text_area.insert(tk.END, "-"*50 + "\n")
-
-        text_area.configure(state='disabled')
-
-    def open_options_window(self):
-        """Apre una nuova finestra per le opzioni con il pulsante 'Applica Modifiche'."""
-        opzioni_window = tk.Toplevel(self.master)
-        opzioni_window.title("Opzioni")
-        opzioni_window.geometry("300x150")
-        opzioni_window.transient(self.master)
-        opzioni_window.grab_set()
-
-        tema_originale = self.master.style.theme_use()
-        svuota_originale_state = self.svuota_file_var.get()
-        
-        opzioni_frame = ttk.Frame(opzioni_window, padding=15)
-        opzioni_frame.pack(fill=BOTH, expand=True)
-
-        svuota_check = ttk.Checkbutton(opzioni_frame,
-                                        text="Svuota file dati dopo l'invio",
-                                        variable=self.svuota_file_var,
-                                        bootstyle="round-toggle")
-        svuota_check.pack(pady=(0, 10))
-
-        tema_frame = ttk.Frame(opzioni_frame)
-        tema_frame.pack(fill=tk.X)
-
-        tema_label = ttk.Label(tema_frame, text="Scegli Tema:")
-        tema_label.pack(side=tk.LEFT, padx=(0, 10))
-        
-        temi = self.master.style.theme_names()
-        tema_combo = ttk.Combobox(tema_frame, values=temi, state="readonly")
-        tema_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tema_combo.set(tema_originale)
-        
-        def on_tema_scelto(event):
-            """Cambia il tema dell'applicazione in tempo reale."""
-            tema_selezionato = tema_combo.get()
-            self.master.style.theme_use(tema_selezionato)
-
-        tema_combo.bind("<<ComboboxSelected>>", on_tema_scelto)
-        
-        def apply_options():
-            """Applica e salva le modifiche delle opzioni."""
-            tema_selezionato = tema_combo.get()
-            self._save_config_value('SETTINGS', 'theme', tema_selezionato)
-            self._save_config_value('SETTINGS', 'svuota_file', self.svuota_file_var.get())
-            messagebox.showinfo("Opzioni salvate", "Le modifiche sono state salvate con successo!")
-            opzioni_window.destroy()
-
-        def reset_options():
-            """Annulla le modifiche e chiude la finestra."""
-            self.master.style.theme_use(tema_originale)
-            self.svuota_file_var.set(svuota_originale_state)
-            opzioni_window.destroy()
-
-        btn_frame = ttk.Frame(opzioni_window)
-        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-        btn_frame.columnconfigure(0, weight=1)
-        btn_frame.columnconfigure(1, weight=1)
-
-        apply_btn = ttk.Button(btn_frame, text="Applica", command=apply_options, bootstyle="success")
-        apply_btn.grid(row=0, column=0, padx=(0, 5))
-        
-        cancel_btn = ttk.Button(btn_frame, text="Annulla", command=reset_options, bootstyle="danger")
-        cancel_btn.grid(row=0, column=1, padx=(5, 0))
-
-    def run_bot(self):
-        """Esegue la logica principale del bot."""
-        self._log_message("Avvio del bot...")
-        file_path = self.file_path_var.get()
-
-        if not file_path or not os.path.exists(file_path):
-            self._log_message("Errore: Percorso del file non valido. Seleziona un file e riprova.")
-            messagebox.showerror("Errore", "Seleziona un file valido prima di avviare il bot.")
-            return
-
-        spreadsheet_name = self.spreadsheet_name_var.get()
-        worksheet_name = self.worksheet_name_var.get()
-        svuota_file = self.svuota_file_var.get()
-
-        if not spreadsheet_name:
-            self._log_message("Errore: Il nome del foglio di calcolo non può essere vuoto.")
-            messagebox.showerror("Errore", "Inserisci il nome del foglio di calcolo.")
-            return
-
-        if not worksheet_name:
-            self._log_message("Errore: Il nome del foglio di lavoro non può essere vuoto.")
-            messagebox.showerror("Errore", "Inserisci il nome del foglio di lavoro.")
-            return
-
-        dati_emails = self.processa_file_testo(file_path)
-        
-        if dati_emails:
-            self._log_message(f"Trovati {len(dati_emails)} nuovi record da scrivere.")
-            self.scrivi_su_sheets(dati_emails, spreadsheet_name, worksheet_name)
-            
-            if svuota_file:
-                try:
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write('')
-                    self._log_message(f"File '{os.path.basename(file_path)}' svuotato con successo.")
-                except Exception as e:
-                    self._log_message(f"Errore durante lo svuotamento del file: {e}")
-            
-        else:
-            self._log_message("Nessun nuovo dato da scrivere.")
-        
-        self._log_message("Bot completato.")
-
-    # --- Logica del bot originale, ora come metodi della classe ---
-
-    def get_google_sheet_client(self):
-        """Si connette a Google Sheets usando le credenziali di servizio."""
-        try:
-            creds_file_name = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
-            creds_path = os.path.join(self.user_data_path, creds_file_name)
-            
-            if not os.path.exists(creds_path):
-                self._log_message(f"Errore: File '{creds_file_name}' non trovato nella cartella di configurazione. Assicurati di averlo caricato tramite il tutorial.")
-                messagebox.showerror("Errore Credenziali", f"File credenziali non trovato. Per favore, segui il tutorial per configurare il file '{creds_file_name}' in: {self.user_data_path}")
-                return None
-            
-            creds = service_account.Credentials.from_service_account_file(
-                creds_path,
-                scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-            )
-            client = gspread.authorize(creds)
-            self._log_message("Autenticazione con Google Sheets riuscita.")
-            return client
-        except Exception as e:
-            self._log_message(f"Errore di autenticazione con Google Sheets: {e}")
-            messagebox.showerror("Errore di Autenticazione", f"Verifica che il file delle credenziali sia corretto e che le API siano abilitate: {e}")
-            return None
-
-    def scrivi_su_sheets(self, dati_emails, spreadsheet_name, worksheet_name):
-        """Scrive più righe di dati nel foglio di Google Sheets specificato."""
-        client = self.get_google_sheet_client()
-        if not client:
-            return
-
-        self._log_message(f"Tentativo di scrittura nel foglio di calcolo: '{spreadsheet_name}'")
-        self._log_message(f"Tentativo di scrittura nel foglio di lavoro: '{worksheet_name}'")
-
-        try:
-            sheet = client.open(spreadsheet_name).worksheet(worksheet_name)
-        except WorksheetNotFound:
-            self._log_message(f"Il foglio di lavoro '{worksheet_name}' non è stato trovato. Creazione in corso...")
-            try:
-                workbook = client.open(spreadsheet_name)
-                sheet = workbook.add_worksheet(title=worksheet_name, rows="100", cols="20")
-                self._log_message(f"Foglio '{worksheet_name}' creato con successo.")
-            except Exception as e:
-                self._log_message(f"Errore durante la creazione del foglio '{worksheet_name}': {e}")
-                messagebox.showerror("Errore Creazione Foglio", f"Non è stato possibile creare il foglio di lavoro. Verifica che il nome del foglio di calcolo principale sia corretto e che l'account di servizio abbia i permessi di 'Editor': {e}")
-                return
-        except gspread.exceptions.SpreadsheetNotFound:
-            self._log_message(f"Errore: Il foglio di calcolo '{spreadsheet_name}' non è stato trovato o l'account di servizio non ha i permessi necessari.")
-            messagebox.showerror("Errore Foglio di Calcolo", f"Il foglio di calcolo '{spreadsheet_name}' non è stato trovato. Assicurati che il nome sia corretto e che l'account di servizio abbia i permessi di 'Editor'.")
-            return
-        except APIError as e:
-            self._log_message(f"Errore API durante l'accesso a Google Sheets: {e}")
-            messagebox.showerror("Errore API", f"Si è verificato un errore con l'API di Google Sheets. Controlla i permessi e la connessione a Internet. Dettagli: {e}")
-            return
-
-        try:
-            if dati_emails:
-                sheet.append_rows(dati_emails)
-                self._log_message(f"Dati scritti con successo: {len(dati_emails)} righe nel foglio '{worksheet_name}'.")
-            else:
-                self._log_message(f"Nessun dato da scrivere nel foglio '{worksheet_name}'.")
-
-        except Exception as e:
-            self._log_message(f"Errore durante la scrittura su Google Sheets: {e}")
-            messagebox.showerror("Errore Scrittura Dati", f"Si è verificato un errore durante la scrittura dei dati. Dettagli: {e}")
-            
-    def pulisci_testo(self, testo):
-        """Rimuove caratteri indesiderati e spazi extra."""
-        if testo:
-            # Sostituisce più spazi con uno solo, rimuove spazi all'inizio e alla fine
-            return re.sub(r'\s+', ' ', testo).strip()
-        return ""
-
-    def estrai_dati_da_testo(self, blocco_testo):
-        """Estrae i dati da un blocco di testo formattato in righe separate."""
-        dati = {
-            "Nome": "",
-            "Cognome": "",
-            "Eta": "",
-            "Occupazione": "",
-            "Email Mittente": "",
-            "Numero di Telefono": "",
-            "Richiesta": "",
-        }
-        
-        # Dividi il blocco di testo in righe
-        righe = blocco_testo.strip().split('\n')
-        
-        if not righe:
-            return None
-
-        # Estrazione dati
-        if len(righe) > 0:
-            # Riga 1: Nome, Cognome e Età
-            riga1 = self.pulisci_testo(righe[0])
-            parti_riga1 = riga1.split()
-            if len(parti_riga1) >= 3 and parti_riga1[-1].isdigit():
-                dati["Eta"] = parti_riga1[-1]
-                dati["Nome"] = " ".join(parti_riga1[:-2])
-                dati["Cognome"] = parti_riga1[-2]
-            elif len(parti_riga1) >= 2:
-                dati["Nome"] = " ".join(parti_riga1[:-1])
-                dati["Cognome"] = parti_riga1[-1]
-
-        if len(righe) > 1:
-            # Riga 2: Occupazione
-            dati["Occupazione"] = self.pulisci_testo(righe[1])
-            
-        if len(righe) > 2:
-            # Riga 3: Email e Numero di Telefono
-            riga3 = self.pulisci_testo(righe[2])
-            match_email = re.search(r'[\w\.-]+@[\w\.-]+', riga3)
-            if match_email:
-                dati["Email Mittente"] = match_email.group(0)
-            
-            match_tel = re.search(r'\+?\d[\d\s-]{7,}\d', riga3)
-            if match_tel:
-                dati["Numero di Telefono"] = match_tel.group(0)
-
-        if len(righe) > 3:
-            # Riga 4: Richiesta
-            richiesta = " ".join(righe[3:]).strip()
-            dati["Richiesta"] = richiesta if richiesta else "Nessuna richiesta specificata"
-
-        return [
-            dati["Nome"],
-            dati["Cognome"],
-            dati["Eta"],
-            dati["Occupazione"],
-            dati["Email Mittente"],
-            dati["Numero di Telefono"],
-            dati["Richiesta"],
-            datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        ]
-
-    def processa_file_testo(self, file_path):
+            self._log_message(f"File selezionato: {os.path.basename(file_path)}")
+    
+    def leggi_file_dati(self, file_path):
         """
         Legge un file di testo, lo divide in blocchi basati su una riga vuota
-        e estrae i dati da ogni blocco.
+        e estrae i dati dal formato specifico dell'utente.
         """
         dati_emails = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 contenuto = f.read()
             
-            # Divide il contenuto in blocchi basati su righe vuote o sequenze di trattini
-            blocchi = re.split(r'\n{2,}|\n-{5,}\n', contenuto.strip())
+            # Divide il contenuto in blocchi basati su righe vuote
+            blocchi = re.split(r'\n{2,}', contenuto.strip())
             
             for blocco in blocchi:
                 if blocco.strip():
-                    dati = self.estrai_dati_da_testo(blocco)
-                    if dati and dati[4]: # Controllo che l'email non sia vuota
-                        dati_emails.append(dati)
-                    else:
-                        self._log_message(f"Blocco ignorato, dati insufficienti: {blocco.strip()[:50]}...")
+                    righe = [line.strip() for line in blocco.split('\n') if line.strip()]
+                    
+                    # Estrae i dati dalla prima riga
+                    riga_uno = righe[0].split()
+                    nome = riga_uno[0]
+                    cognome = riga_uno[1]
+                    eta = riga_uno[2]
+                    occupazione = riga_uno[3]
+
+                    # Estrae l'email dalla seconda riga e il telefono dalla terza
+                    email = righe[1]
+                    telefono = righe[2]
+                    
+                    dati = [nome, cognome, eta, occupazione, email, telefono]
+                    dati_emails.append(dati)
                         
             return dati_emails
 
@@ -808,6 +423,132 @@ class BotApp(ttk.Frame):
             self._log_message(f"Errore durante la lettura del file: {e}")
             return []
 
+    def show_data_preview(self):
+        """Mostra l'anteprima dei dati in una nuova finestra."""
+        file_path = self.file_path_var.get()
+        if not file_path:
+            messagebox.showerror("Errore", "Seleziona prima un file di testo.")
+            return
+
+        dati = self.leggi_file_dati(file_path)
+        if not dati:
+            messagebox.showinfo("Anteprima Dati", "Nessun dato valido trovato nel file.")
+            return
+            
+        preview_text = "Anteprima dei dati da inviare:\n\n"
+        for riga in dati:
+            preview_text += f"Nome: {riga[0]}, Cognome: {riga[1]}, Età: {riga[2]}, Occupazione: {riga[3]}, Email: {riga[4]}, Telefono: {riga[5]}\n"
+        
+        preview_window = tk.Toplevel(self.master)
+        preview_window.title("Anteprima Dati")
+        preview_window.geometry("600x400")
+        preview_window.grab_set()
+
+        text_widget = tk.Text(preview_window, wrap=WORD)
+        text_widget.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        text_widget.insert(tk.END, preview_text)
+        text_widget.configure(state='disabled')
+
+        ttk.Button(preview_window, text="Chiudi", command=preview_window.destroy, bootstyle="info").pack(pady=10)
+
+    def invia_a_google_sheets(self, dati_emails):
+        """Invia i dati a Google Sheets e restituisce il foglio di lavoro aggiornato."""
+        self._log_message("Connessione a Google Sheets...")
+        gc = self.connect_to_sheets()
+        if not gc:
+            return
+
+        spreadsheet_name = self.spreadsheet_name_var.get()
+        worksheet_name = self.worksheet_name_var.get()
+
+        if not spreadsheet_name or not worksheet_name:
+            self._log_message("ERRORE: Inserisci il nome del foglio di calcolo e del foglio di lavoro.")
+            messagebox.showerror("Errore", "Per favore, inserisci il nome del Foglio di Calcolo e del Foglio di Lavoro.")
+            return
+
+        try:
+            sh = gc.open(spreadsheet_name)
+        except gspread.SpreadsheetNotFound:
+            self._log_message(f"Creazione del foglio di calcolo '{spreadsheet_name}'...")
+            try:
+                sh = gc.create(spreadsheet_name)
+                # Assicurati di condividere il foglio con l'email del servizio
+                sh.share(os.getenv("GSPREAD_EMAIL"), perm_type='user', role='writer')
+            except Exception as e:
+                self._log_message(f"Errore nella creazione del foglio di calcolo: {e}")
+                messagebox.showerror("Errore", f"Impossibile creare il foglio di calcolo: {e}")
+                return
+
+        try:
+            worksheet = sh.worksheet(worksheet_name)
+        except WorksheetNotFound:
+            self._log_message(f"Creazione del foglio di lavoro '{worksheet_name}'...")
+            worksheet = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
+            # Aggiunge le intestazioni
+            worksheet.append_row(["Nome", "Cognome", "Età", "Occupazione", "Email", "Numero di Telefono"])
+        
+        self._log_message(f"Apertura del foglio di lavoro '{worksheet_name}'...")
+        
+        # Trova la prima riga vuota per iniziare a scrivere i dati
+        next_row = len(worksheet.get_all_values()) + 1
+        
+        self._log_message(f"Invio di {len(dati_emails)} righe a Google Sheets a partire dalla riga {next_row}...")
+        
+        cell_list = []
+        for i, riga in enumerate(dati_emails):
+            # Mappa i dati alle colonne richieste
+            # Nome in colonna B, Cognome in C, Età in D, ecc.
+            # L'indice 1 corrisponde alla colonna B in gspread (che è 1-based)
+            cell_list.append(gspread.Cell(next_row + i, 2, riga[0])) # Nome
+            cell_list.append(gspread.Cell(next_row + i, 3, riga[1])) # Cognome
+            cell_list.append(gspread.Cell(next_row + i, 4, riga[2])) # Età
+            cell_list.append(gspread.Cell(next_row + i, 5, riga[3])) # Occupazione
+            cell_list.append(gspread.Cell(next_row + i, 6, riga[4])) # Email
+            cell_list.append(gspread.Cell(next_row + i, 7, riga[5])) # Telefono
+            cell_list.append(gspread.Cell(next_row + i, 8, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))) # Data Inserimento
+
+        worksheet.update_cells(cell_list)
+        self._log_message("Dati inviati con successo!")
+        
+        return worksheet
+
+    def svuota_file_dati(self):
+        """Svuota il contenuto del file di dati se l'opzione è attiva."""
+        if self.svuota_file_var.get():
+            file_path = self.file_path_var.get()
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write("")
+                    self._log_message("File dati svuotato con successo.")
+                except Exception as e:
+                    self._log_message(f"Errore durante lo svuotamento del file: {e}")
+
+    def run_bot(self):
+        """Logica principale del bot."""
+        file_path = self.file_path_var.get()
+        if not file_path or not os.path.exists(file_path):
+            self._log_message("ERRORE: Seleziona un file valido prima di avviare il bot.")
+            messagebox.showerror("Errore", "Per favore, seleziona un file dati valido.")
+            return
+
+        self._log_message("Lettura e elaborazione del file dati...")
+        dati_emails = self.leggi_file_dati(file_path)
+
+        if not dati_emails:
+            self._log_message("Nessun dato valido trovato nel file. Operazione completata.")
+            messagebox.showinfo("Bot", "Nessun dato valido da inviare. Operazione completata.")
+            return
+
+        self._log_message(f"{len(dati_emails)} blocchi di dati validi trovati.")
+        
+        self.invia_a_google_sheets(dati_emails)
+        
+        if self.svuota_file_var.get():
+            self.svuota_file_dati()
+            
+        self._log_message("Processo bot completato.")
+        messagebox.showinfo("Bot", "Operazione completata con successo.")
 
 # --- Punto di Ingresso dell'applicazione ---
 if __name__ == "__main__":
@@ -817,5 +558,6 @@ if __name__ == "__main__":
         app.mainloop()
     except Exception as e:
         import traceback
-        print("Errore critico all'avvio dell'applicazione:")
+        print(f"Errore critico: {e}")
         traceback.print_exc()
+
