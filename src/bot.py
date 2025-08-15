@@ -34,7 +34,7 @@ else:
 
 load_dotenv()
 
-CURRENT_VERSION = "1.0.4"
+CURRENT_VERSION = "1.0.6"
 
 class BotApp(ttk.Frame):
     """
@@ -485,7 +485,6 @@ class BotApp(ttk.Frame):
             if num_rows <= 0:
                 return
                 
-            # Crea la richiesta per la validazione dati (checkbox)
             requests = {
                 "requests": [{
                     "setDataValidation": {
@@ -493,7 +492,7 @@ class BotApp(ttk.Frame):
                             "sheetId": worksheet.id,
                             "startRowIndex": start_row - 1,
                             "endRowIndex": start_row + num_rows - 1,
-                            "startColumnIndex": 0,  # Colonna A
+                            "startColumnIndex": 0, 
                             "endColumnIndex": 1
                         },
                         "rule": {
@@ -502,13 +501,13 @@ class BotApp(ttk.Frame):
                             },
                             "inputMessage": "Seleziona/Deseleziona",
                             "strict": True,
-                            "showCustomUi": True  # Mostra le checkbox come elementi UI
+                            "showCustomUi": True  
                         }
                     }
                 }]
             }
             
-            # Invia la richiesta
+            
             worksheet.spreadsheet.batch_update(requests)
             
         except Exception as e:
@@ -545,7 +544,7 @@ class BotApp(ttk.Frame):
                 existing_data = worksheet.get_all_values()
             except WorksheetNotFound:
                 self._log_message(f"Creazione del foglio di lavoro '{worksheet_name}'...")
-                worksheet = sh.add_worksheet(title=worksheet_name, rows=len(dati_emails)+10, cols=7)  # Solo 7 colonne (A-G)
+                worksheet = sh.add_worksheet(title=worksheet_name, rows=len(dati_emails)+10, cols=7)  
                 existing_data = []
             
             # Intestazioni corrette della tabella (A1:G1)
@@ -601,7 +600,7 @@ class BotApp(ttk.Frame):
                 return
                 
             sheet_id = worksheet.id
-            end_row = start_row + num_rows - 1  # Riga finale dei dati
+            end_row = start_row + num_rows - 1  
             
             # Crea la richiesta di formattazione condizionale
             requests = {
