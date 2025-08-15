@@ -93,15 +93,7 @@ pyinstaller --onefile --windowed --icon=assets/icons/bot_icon.icns src/bot.py
 
 Per Linux:
 
-pyinstaller \
- --onefile \
- --name DataToSheets-Linux \
- --add-data="src/assets/icons/\*:assets/icons" \
- --additional-hooks-dir=hooks \
- --hidden-import='PIL.\_tkinter_finder' \
- --hidden-import='PIL.Image' \
- --hidden-import='PIL.ImageTk' \
- src/bot.py
+pyinstaller --onefile --name DataToSheets-Linux --add-data="src/assets/icons/\*:assets/icons" --additional-hooks-dir=hooks --hidden-import='PIL.\_tkinter_finder' --hidden-import='PIL.Image' --hidden-import='PIL.ImageTk' src/bot.py
 ·
 Il file eseguibile (.exe o .app) si troverà nella cartella dist/.
 

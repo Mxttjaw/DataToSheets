@@ -57,12 +57,8 @@ class BotApp(ttk.Frame):
         self.tutorial_state_var = tk.BooleanVar()
         self.update_available = tk.BooleanVar(value=False)
         self.running_thread = None
-        self.headers_set = False # Variabile di stato per la gestione delle intestazioni
-
-        # Costruiamo la GUI PRIMA di creare l'Updater (per avere log_area pronto)
+        self.headers_set = False 
         self.create_gui_elements()
-
-        # Crea un'istanza della classe Updater e passa il metodo di log
         self.updater = Updater(current_version=CURRENT_VERSION, log_callback=self._log_message)
 
         self._create_user_config_directory()
@@ -109,7 +105,6 @@ class BotApp(ttk.Frame):
         menu.add_command(label="Avvia Bot", command=self.start_bot_thread)
         menu.add_command(label="Opzioni", command=self.open_options_window)
         menu.add_command(label="Tutorial", command=self.show_tutorial_window)
-        # Sostituisce la vecchia logica con la chiamata all'Updater
         menu.add_command(label="Controlla Aggiornamenti", command=lambda: Thread(target=lambda: self.updater.check_for_updates(on_update_available=lambda: self.update_available.set(True)), daemon=True).start())
         menu.add_separator()
         menu.add_command(label="Esci", command=self.master.quit)
@@ -261,23 +256,25 @@ class BotApp(ttk.Frame):
             self._log_message("Nessun percorso file salvato. Seleziona il file dei dati.")
 
     def _log_message(self, message):
-        """Aggiorna la Textbox della GUI con un messaggio e un timestamp (fallback su stdout)."""
+        """Aggiorna la Textbox della GUI con un messaggio e un timestamp."""
+        try:
+            # Decodifica eventuali caratteri speciali
+            if isinstance(message, bytes):
+                message = message.decode('utf-8', errors='replace')
+            message = message.replace('Ã¨', 'è').replace('Ã', 'à')  # Correzione specifica
+        except Exception:
+            pass
+        
         timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        full = f"{timestamp} {message}\n"
-        if not hasattr(self, 'log_area') or self.log_area is None:
-            print(full, end='')
-            return
-
+        full_message = f"{timestamp} {message}\n"
+        
         try:
             self.log_area.configure(state='normal')
-            self.log_area.insert(tk.END, full)
+            self.log_area.insert(tk.END, full_message)
             self.log_area.configure(state='disabled')
             self.log_area.see(tk.END)
         except Exception:
-            try:
-                print(full, end='')
-            except Exception:
-                pass
+            print(full_message, end='')
 
     # --- Metodi per la gestione della configurazione (configparser) ---
 
@@ -481,9 +478,44 @@ class BotApp(ttk.Frame):
         text_widget.configure(state='disabled')
 
         ttk.Button(preview_window, text="Chiudi", command=preview_window.destroy, bootstyle="info").pack(pady=10)
+    
+    def _configura_checkbox(self, worksheet, start_row, num_rows):
+        """Configura le checkbox nella colonna A"""
+        try:
+            if num_rows <= 0:
+                return
+                
+            # Crea la richiesta per la validazione dati (checkbox)
+            requests = {
+                "requests": [{
+                    "setDataValidation": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": start_row - 1,
+                            "endRowIndex": start_row + num_rows - 1,
+                            "startColumnIndex": 0,  # Colonna A
+                            "endColumnIndex": 1
+                        },
+                        "rule": {
+                            "condition": {
+                                "type": "BOOLEAN"
+                            },
+                            "inputMessage": "Seleziona/Deseleziona",
+                            "strict": True,
+                            "showCustomUi": True  # Mostra le checkbox come elementi UI
+                        }
+                    }
+                }]
+            }
+            
+            # Invia la richiesta
+            worksheet.spreadsheet.batch_update(requests)
+            
+        except Exception as e:
+            self._log_message(f"Errore durante la configurazione delle checkbox: {str(e)}")
 
     def invia_a_google_sheets(self, dati_emails):
-        """Invia i dati a Google Sheets e restituisce il foglio di lavoro aggiornato."""
+        """Invia i dati a Google Sheets con checkbox funzionanti e formattazione corretta"""
         self._log_message("Connessione a Google Sheets...")
         gc = self.connect_to_sheets()
         if not gc:
@@ -498,50 +530,207 @@ class BotApp(ttk.Frame):
             return
 
         try:
-            sh = gc.open(spreadsheet_name)
-        except gspread.SpreadsheetNotFound:
-            self._log_message(f"Creazione del foglio di calcolo '{spreadsheet_name}'...")
+            # Apri o crea il foglio di calcolo
             try:
+                sh = gc.open(spreadsheet_name)
+            except gspread.SpreadsheetNotFound:
+                self._log_message(f"Creazione del foglio di calcolo '{spreadsheet_name}'...")
                 sh = gc.create(spreadsheet_name)
-                # Assicurati di condividere il foglio con l'email del servizio
-                sh.share(os.getenv("GSPREAD_EMAIL"), perm_type='user', role='writer')
-            except Exception as e:
-                self._log_message(f"Errore nella creazione del foglio di calcolo: {e}")
-                messagebox.showerror("Errore", f"Impossibile creare il foglio di calcolo: {e}")
-                return
+                if os.getenv("GSPREAD_EMAIL"):
+                    sh.share(os.getenv("GSPREAD_EMAIL"), perm_type='user', role='writer')
 
+            # Apri o crea il foglio di lavoro
+            try:
+                worksheet = sh.worksheet(worksheet_name)
+                existing_data = worksheet.get_all_values()
+            except WorksheetNotFound:
+                self._log_message(f"Creazione del foglio di lavoro '{worksheet_name}'...")
+                worksheet = sh.add_worksheet(title=worksheet_name, rows=len(dati_emails)+10, cols=7)  # Solo 7 colonne (A-G)
+                existing_data = []
+            
+            # Intestazioni corrette della tabella (A1:G1)
+            headers = ["✅", "Nome", "Cognome", "Età", "Occupazione", "Email", "Numero di telefono"]
+            
+            # Se il foglio è vuoto, aggiungi le intestazioni
+            if not existing_data:
+                worksheet.update(values=[headers], range_name='A1:G1')
+            
+            # Prepara i nuovi dati (partendo da A2)
+            new_rows = []
+            for riga in dati_emails:
+                new_row = [
+                    False,  # Checkbox inizialmente non selezionata (colonna A)
+                    riga[0],  # Nome (colonna B)
+                    riga[1],  # Cognome (colonna C)
+                    riga[2],  # Età (colonna D)
+                    riga[3],  # Occupazione (colonna E)
+                    riga[4],  # Email (colonna F)
+                    riga[5]  # Telefono (colonna G)
+                ]
+                new_rows.append(new_row)
+            
+            # Trova la prima riga vuota (partendo da A2)
+            next_row = len(existing_data) + 1 if existing_data else 2
+            
+            # Aggiungi i nuovi dati a partire da A2
+            if new_rows:
+                worksheet.update(values=new_rows, range_name=f'A{next_row}:G{next_row + len(new_rows) - 1}')
+                self._log_message(f"Aggiunte {len(new_rows)} righe alla tabella")
+            
+            # Configura le checkbox nella colonna A
+            self._configura_checkbox(worksheet, next_row, len(new_rows))
+            
+            # Formattazione della tabella
+            self._formatta_tabella(worksheet, next_row + len(new_rows) - 1)
+            
+            # Applica la formattazione condizionale
+            self._applica_formattazione_condizionale(worksheet, next_row, len(new_rows))
+            
+            return worksheet
+
+        except Exception as e:
+            self._log_message(f"Errore durante l'invio a Google Sheets: {e}")
+            messagebox.showerror("Errore", f"Si è verificato un errore: {e}")
+            return None
+
+    
+    def _applica_formattazione_condizionale(self, worksheet, start_row, num_rows):
+        """Applica la formattazione condizionale corretta (solo fino alla colonna G)"""
         try:
-            worksheet = sh.worksheet(worksheet_name)
-        except WorksheetNotFound:
-            self._log_message(f"Creazione del foglio di lavoro '{worksheet_name}'...")
-            worksheet = sh.add_worksheet(title=worksheet_name, rows=100, cols=20)
-            # Aggiunge le intestazioni
-            worksheet.append_row(["Nome", "Cognome", "Età", "Occupazione", "Email", "Numero di Telefono"])
-        
-        self._log_message(f"Apertura del foglio di lavoro '{worksheet_name}'...")
-        
-        # Trova la prima riga vuota per iniziare a scrivere i dati
-        next_row = len(worksheet.get_all_values()) + 1
-        
-        self._log_message(f"Invio di {len(dati_emails)} righe a Google Sheets a partire dalla riga {next_row}...")
-        
-        cell_list = []
-        for i, riga in enumerate(dati_emails):
-            # Mappa i dati alle colonne richieste
-            # Nome in colonna B, Cognome in C, Età in D, ecc.
-            # L'indice 1 corrisponde alla colonna B in gspread (che è 1-based)
-            cell_list.append(gspread.Cell(next_row + i, 2, riga[0])) # Nome
-            cell_list.append(gspread.Cell(next_row + i, 3, riga[1])) # Cognome
-            cell_list.append(gspread.Cell(next_row + i, 4, riga[2])) # Età
-            cell_list.append(gspread.Cell(next_row + i, 5, riga[3])) # Occupazione
-            cell_list.append(gspread.Cell(next_row + i, 6, riga[4])) # Email
-            cell_list.append(gspread.Cell(next_row + i, 7, riga[5])) # Telefono
-            cell_list.append(gspread.Cell(next_row + i, 8, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))) # Data Inserimento
+            if num_rows <= 0:
+                return
+                
+            sheet_id = worksheet.id
+            end_row = start_row + num_rows - 1  # Riga finale dei dati
+            
+            # Crea la richiesta di formattazione condizionale
+            requests = {
+                "requests": [{
+                    "addConditionalFormatRule": {
+                        "rule": {
+                            "ranges": [{
+                                "sheetId": sheet_id,
+                                "startRowIndex": start_row - 1,  # -1 perché l'index è 0-based
+                                "endRowIndex": end_row,          # Fino all'ultima riga dei dati (esclusa)
+                                "startColumnIndex": 0,          # Dalla colonna A
+                                "endColumnIndex": 7             # Fino a colonna G (esclusa)
+                            }],
+                            "booleanRule": {
+                                "condition": {
+                                    "type": "CUSTOM_FORMULA",
+                                    "values": [{"userEnteredValue": "=INDIRECT(\"A\"&ROW())=TRUE"}]
+                                },
+                                "format": {
+                                    "textFormat": {
+                                        "strikethrough": True,
+                                        "foregroundColor": {"red": 0.6, "green": 0.6, "blue": 0.6}
+                                    },
+                                    "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95}
+                                }
+                            }
+                        },
+                        "index": 0
+                    }
+                }]
+            }
+            
+            # Invia la richiesta
+            worksheet.spreadsheet.batch_update(requests)
+            
+        except Exception as e:
+            self._log_message(f"Errore durante la formattazione condizionale: {str(e)}")
 
-        worksheet.update_cells(cell_list)
-        self._log_message("Dati inviati con successo!")
-        
-        return worksheet
+    def _formatta_tabella(self, worksheet, last_row):
+        """Applica la formattazione base alla tabella"""
+        try:
+            # Formatta le intestazioni (A1:G1)
+            requests = {
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 7
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "textFormat": {"bold": True},
+                                "backgroundColor": {"red": 0.8, "green": 0.9, "blue": 1.0},
+                                "horizontalAlignment": "CENTER"
+                            }
+                        },
+                        "fields": "userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)"
+                    }
+                },
+                {
+                    "updateBorders": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 0,
+                            "endRowIndex": last_row,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 7
+                        },
+                        "top": {"style": "SOLID"},
+                        "bottom": {"style": "SOLID"},
+                        "left": {"style": "SOLID"},
+                        "right": {"style": "SOLID"},
+                        "innerHorizontal": {"style": "SOLID"},
+                        "innerVertical": {"style": "SOLID"}
+                    }
+                },
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": 0,
+                                "endIndex": 1
+                            },
+                            "properties": {
+                                "pixelSize": 60  # Larghezza colonna checkbox
+                            },
+                            "fields": "pixelSize"
+                        }
+                    },
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": 1,
+                                "endIndex": 7
+                            },
+                            "properties": {
+                                "pixelSize": 120  # Larghezza colonne dati
+                            },
+                            "fields": "pixelSize"
+                        }
+                    },
+                    {
+                        "updateDimensionProperties": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "dimension": "COLUMNS",
+                                "startIndex": 5,
+                                "endIndex": 6
+                            },
+                            "properties": {
+                                "pixelSize": 180  # Larghezza colonna email
+                            },
+                            "fields": "pixelSize"
+                        }
+                    }
+                ]
+            }
+            
+            worksheet.spreadsheet.batch_update(requests)
+            
+        except Exception as e:
+            self._log_message(f"Errore durante la formattazione della tabella: {str(e)}")
 
     def svuota_file_dati(self):
         """Svuota il contenuto del file di dati se l'opzione è attiva."""
