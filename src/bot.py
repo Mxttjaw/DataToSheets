@@ -34,7 +34,7 @@ else:
 
 load_dotenv()
 
-CURRENT_VERSION = "1.0.6"
+CURRENT_VERSION = "1.0.8"
 
 class BotApp(ttk.Frame):
     """
