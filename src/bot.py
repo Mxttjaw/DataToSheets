@@ -413,35 +413,212 @@ class BotApp(ttk.Frame):
     
     def leggi_file_dati(self, file_path):
         """
-        Legge un file di testo, lo divide in blocchi basati su una riga vuota
-        e estrae i dati dal formato specifico dell'utente.
+        Legge un file di testo, lo divide in blocchi e ritorna i dati estratti in modo robusto.
+        Rimuove sempre la porzione 'SISTEMA ...' (es. 'SISTEMA INVIO ONLINE - SITO WEB' o
+        'SISTEMA DI INVIO ...') prima del parsing così quella parte non viene mai inviata su Google Sheets.
         """
         dati_emails = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 contenuto = f.read()
-            
-            # Divide il contenuto in blocchi basati su righe vuote
-            blocchi = re.split(r'\n{2,}', contenuto.strip())
-            
-            for blocco in blocchi:
-                if blocco.strip():
-                    righe = [line.strip() for line in blocco.split('\n') if line.strip()]
-                    
-                    # Estrae i dati dalla prima riga
-                    riga_uno = righe[0].split()
-                    nome = riga_uno[0]
-                    cognome = riga_uno[1]
-                    eta = riga_uno[2]
-                    occupazione = riga_uno[3]
 
-                    # Estrae l'email dalla seconda riga e il telefono dalla terza
-                    email = righe[1]
-                    telefono = righe[2]
-                    
-                    dati = [nome, cognome, eta, occupazione, email, telefono]
-                    dati_emails.append(dati)
-                        
+            blocchi = re.split(r'\n{2,}', contenuto.strip())
+
+            email_pattern = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', re.IGNORECASE)
+            phone_pattern = re.compile(r'\+?[0-9][0-9 ()\-\.]{5,}[0-9]')
+
+            COUNTRY_CODES = [
+                '1242','1246','1264','1268','1284','1340','1345','1441','1649','1664','1721','1758',
+                '1767','1784','1787','1809','1829','1849','380','385','386','234','91','39','44','33',
+                '34','49','36','30','31','32','52','54','55','56','57','58','60','61','62','63','64',
+                '65','66','7','1','20','27','86','81','82','84','90','92','98'
+            ]
+            COUNTRY_CODES = sorted(set(COUNTRY_CODES), key=lambda x: -len(x))
+
+            def format_phone(phone_raw):
+                if not phone_raw or not phone_raw.strip():
+                    return ''
+                s = phone_raw.strip()
+                digits = re.sub(r'[^0-9]', '', s)
+
+                if s.startswith('+') and digits:
+                    matched = None
+                    for cc in COUNTRY_CODES:
+                        if digits.startswith(cc):
+                            rest = digits[len(cc):]
+                            if len(rest) >= 6:
+                                matched = cc
+                                break
+                    if not matched:
+                        m_space = re.match(r'^\+([^\s]+)\s', s)
+                        if m_space:
+                            cc_candidate = re.sub(r'[^0-9]', '', m_space.group(1))
+                            if cc_candidate and digits.startswith(cc_candidate) and len(digits[len(cc_candidate):]) >= 6:
+                                matched = cc_candidate
+                    if not matched:
+                        if len(digits) > 2 and len(digits[2:]) >= 6:
+                            matched = digits[:2]
+                        elif len(digits) > 1 and len(digits[1:]) >= 6:
+                            matched = digits[:1]
+                        else:
+                            matched = ''
+                    if matched:
+                        rest = digits[len(matched):]
+                        return f'+{matched} {rest}'
+                    else:
+                        return '+' + digits
+                else:
+                    return digits
+
+            # parole chiave occupazione
+            OCCUPATION_KEYWORDS = {
+                'data','scientist','developer','engineer','ingegnere','analyst','analista',
+                'manager','director','cto','ceo','founder','owner','product','designer','marketing',
+                'sales','consultant','consulente','responsabile','head','research','ricerca',
+                'system','sistema','invio','online','site','sito','web','interno','internal',
+                'operations','operation','specialist','teacher','professor','prof','doctor','dr',
+                'student','studente','amministratore','admin','support','supporto','dev','architect'
+            }
+
+            def token_is_occupation(tok):
+                if not tok:
+                    return False
+                t = re.sub(r'[^A-Za-z0-9]', '', tok).lower()
+                if not t:
+                    return False
+                if t in OCCUPATION_KEYWORDS:
+                    return True
+                for kw in OCCUPATION_KEYWORDS:
+                    if kw in t:
+                        return True
+                return False
+
+            # pattern per rimuovere la porzione "SISTEMA ...", compresi "SISTEMA DI INVIO"
+            SYSTEM_REMOVE_RE = re.compile(r'\bSISTEMA(?:\s+DI)?\s+INVIO\b.*', re.IGNORECASE)
+            # rimuove anche tag di tipo "EMAIL_INTERNAL", "SITO WEB", "ONLINE" eventuali rimasugli
+            TRAILING_TAGS_RE = re.compile(r'\b(EMAIL_INTERNAL|SITO\s+WEB|SITO|ONLINE|SITE|WEB|INTERNAL)\b.*', re.IGNORECASE)
+
+            for blocco in blocchi:
+                if not blocco.strip():
+                    continue
+                righe = [line.strip() for line in blocco.split('\n') if line.strip()]
+                text = ' '.join(righe)
+
+                email_match = email_pattern.search(text)
+                email = email_match.group(0).strip() if email_match else ''
+
+                phone_match = phone_pattern.search(text)
+                telefono_raw = phone_match.group(0).strip() if phone_match else ''
+                telefono_formatted = format_phone(telefono_raw)
+
+                # Rimuovo email e telefono dal testo prima di cercare l'età
+                text_for_age = text
+                if telefono_raw:
+                    text_for_age = re.sub(re.escape(telefono_raw), ' ', text_for_age)
+                    text_for_age = re.sub(r'\+\d[\d\s\-\.\(\)]{4,}\d', ' ', text_for_age)
+                if email:
+                    text_for_age = re.sub(re.escape(email), ' ', text_for_age)
+
+                # Rimuovo sempre la porzione 'SISTEMA ...' anche dal text_for_age così non influenza nulla
+                text_for_age = SYSTEM_REMOVE_RE.sub(' ', text_for_age)
+                text_for_age = TRAILING_TAGS_RE.sub(' ', text_for_age)
+
+                # ricerca età dopo aver tolto telefono/email e 'SISTEMA...'
+                age_match = re.search(r'\b([1-9][0-9]{0,2})\b', text_for_age)
+                age = ''
+                start_age = end_age = None
+                if age_match:
+                    candidate = int(age_match.group(1))
+                    if 10 <= candidate <= 120:
+                        age = str(candidate)
+                        start_age = age_match.start(1)
+                        end_age = age_match.end(1)
+
+                prima_riga = righe[0] if righe else ''
+                # importante: rimuovo la porzione 'SISTEMA...' dalla prima riga PRIMA di tokenizzare
+                prima_riga = SYSTEM_REMOVE_RE.sub(' ', prima_riga).strip()
+                prima_riga = TRAILING_TAGS_RE.sub(' ', prima_riga).strip()
+
+                fullname = ''
+                occupation = ''
+
+                if age:
+                    # se l'età è presente, dividiamo attorno alla sua posizione
+                    m_in_first = re.search(r'\b' + re.escape(age) + r'\b', prima_riga)
+                    if m_in_first:
+                        before = prima_riga[:m_in_first.start()].strip()
+                        after = prima_riga[m_in_first.end():].strip()
+                    else:
+                        before = text_for_age[:start_age].strip()
+                        after = text_for_age[end_age:].strip()
+                    fullname = before
+                    # rimuovo eventuale "SISTEMA..." in after per sicurezza
+                    after = SYSTEM_REMOVE_RE.sub(' ', after)
+                    after = TRAILING_TAGS_RE.sub(' ', after)
+                    sys_match = re.search(r'\bSISTEMA\s+INVIO\b', after, re.IGNORECASE)
+                    if sys_match:
+                        occupation = after[:sys_match.start()].strip()
+                    else:
+                        occupation = after
+                else:
+                    # Se manca età: cerchiamo indice in cui inizia l'occupazione nella prima riga
+                    prima_riga_clean = prima_riga.strip()
+                    prima_riga_clean = re.sub(r'\s*-\s*', ' - ', prima_riga_clean).strip()
+                    tokens = [t for t in re.split(r'\s+', prima_riga_clean) if t != '']
+
+                    occ_idx = None
+                    for i, tok in enumerate(tokens):
+                        if token_is_occupation(tok):
+                            occ_idx = i
+                            break
+                    if occ_idx is not None and occ_idx >= 1:
+                        fullname = ' '.join(tokens[:occ_idx]).strip()
+                        occupation = ' '.join(tokens[occ_idx:]).strip()
+                    else:
+                        if len(tokens) <= 2:
+                            fullname = ' '.join(tokens).strip()
+                            occupation = ''
+                        else:
+                            if '-' in tokens:
+                                dash_idx = tokens.index('-')
+                                if dash_idx >= 1:
+                                    fullname = ' '.join(tokens[:dash_idx]).strip()
+                                    occupation = ' '.join(tokens[dash_idx+1:]).strip()
+                                else:
+                                    fullname = ' '.join(tokens[:2]).strip()
+                                    occupation = ' '.join(tokens[2:]).strip()
+                            else:
+                                fullname = ' '.join(tokens[:2]).strip()
+                                occupation = ' '.join(tokens[2:]).strip()
+
+                # pulizia definitiva: rimuovo sempre 'SISTEMA...' e tag finali dall'occupation
+                occupation = SYSTEM_REMOVE_RE.sub(' ', occupation).strip()
+                occupation = TRAILING_TAGS_RE.sub(' ', occupation).strip()
+                occupation = re.sub(r'\s{2,}', ' ', occupation).strip()
+
+                # split fullname in nome / cognome (nome = primo token, cognome = resto)
+                nome, cognome = '', ''
+                if fullname:
+                    parts = fullname.split()
+                    if len(parts) == 1:
+                        nome = parts[0]
+                        cognome = ''
+                    else:
+                        nome = parts[0]
+                        cognome = ' '.join(parts[1:])
+
+                # fallback: email e telefono da righe specifiche (se non già trovati)
+                if not email and len(righe) > 1 and '@' in righe[1]:
+                    email = righe[1].strip()
+                if (not telefono_formatted) and len(righe) > 2:
+                    telefono_formatted = format_phone(righe[2])
+
+                if telefono_formatted and (len(re.sub(r'[^0-9]', '', telefono_formatted)) < 6):
+                    self._log_message(f"Telefono sospetto trovato: {telefono_formatted} nel blocco: {prima_riga}")
+
+                dati = [nome or '', cognome or '', age or '', occupation or '', email or '', telefono_formatted or '']
+                dati_emails.append(dati)
+
             return dati_emails
 
         except FileNotFoundError:
@@ -450,6 +627,16 @@ class BotApp(ttk.Frame):
         except Exception as e:
             self._log_message(f"Errore durante la lettura del file: {e}")
             return []
+
+
+
+
+
+
+
+
+
+    
 
     def show_data_preview(self):
         """Mostra l'anteprima dei dati in una nuova finestra."""
