@@ -34,7 +34,7 @@ else:
 
 load_dotenv()
 
-CURRENT_VERSION = "1.0.8"
+CURRENT_VERSION = "1.0.9"
 
 class BotApp(ttk.Frame):
     """
@@ -354,31 +354,87 @@ class BotApp(ttk.Frame):
         self._create_options_window(options_window)
     
     def show_tutorial_window(self):
-        """Apre la finestra del tutorial."""
+        """Mostra una finestra di tutorial con le istruzioni per la configurazione."""
         tutorial_window = tk.Toplevel(self.master)
-        tutorial_window.title("Tutorial")
-        tutorial_window.geometry("500x300")
-        tutorial_window.resizable(False, False)
+        tutorial_window.title("Tutorial: Configurazione Bot")
+        tutorial_window.geometry("700x500")
+        tutorial_window.transient(self.master)
         tutorial_window.grab_set()
 
         tutorial_frame = ttk.Frame(tutorial_window, padding=20)
-        tutorial_frame.pack(fill=BOTH, expand=True)
-
-        tutorial_text = (
-            "Benvenuto nel Bot per la gestione dei dati su Google Sheets!\n\n"
-            "Questo bot ti aiuta a estrarre i dati da un file di testo e a caricarli "
-            "automaticamente su un foglio di calcolo Google Sheets.\n\n"
-            "Passaggi:\n"
-            "1. Clicca su 'Scegli File' per selezionare il file di testo contenente i dati.\n"
-            "2. Inserisci il nome del Foglio di Calcolo e del Foglio di Lavoro.\n"
-            "3. Clicca su 'Anteprima Dati' per vedere cosa verrà inviato.\n"
-            "4. Clicca su 'Avvia Bot' per caricare i dati su Google Sheets.\n"
-            "5. Nelle 'Opzioni' puoi cambiare il tema e attivare lo svuotamento automatico del file.\n\n"
-            "Assicurati di avere il file 'credentials.json' e il file '.env' configurati correttamente."
-        )
+        tutorial_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(tutorial_frame, text=tutorial_text, justify=LEFT, wraplength=450).pack(fill=BOTH, expand=True)
-        ttk.Button(tutorial_frame, text="Chiudi", command=tutorial_window.destroy, bootstyle="info").pack(pady=10)
+        tutorial_text = tk.Text(tutorial_frame, wrap=tk.WORD, font=("Helvetica", 10), relief=tk.FLAT, borderwidth=0)
+        tutorial_text.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        tutorial_text.insert(tk.END, "Benvenuto nel tutorial di configurazione!\n\n", ("bold"))
+        tutorial_text.insert(tk.END, "Per garantire che ogni utente abbia la propria configurazione, il bot ora salva i file in una cartella dedicata del tuo sistema. L'eseguibile, invece, può essere posizionato dove preferisci.\n\n")
+
+        tutorial_text.insert(tk.END, "Passo 1: Abilitare l'API di Google Sheets\n", ("bold"))
+        tutorial_text.insert(tk.END, "Vai su Google Cloud Console (https://console.cloud.google.com/) e assicurati di essere nel progetto corretto. Cerca 'Google Sheets API' e abilitala.\n\n")
+
+        tutorial_text.insert(tk.END, "Passo 2: Creare un account di servizio\n", ("bold"))
+        tutorial_text.insert(tk.END, "1. Sempre nella Cloud Console, vai su 'IAM e Amministrazione' -> 'Account di servizio'.\n")
+        tutorial_text.insert(tk.END, "2. Clicca su 'Crea account di servizio'.\n")
+        tutorial_text.insert(tk.END, "3. Assegna un nome (es. 'bot-sheets-service').\n")
+        tutorial_text.insert(tk.END, "4. Concedi i permessi necessari (es. 'Editor').\n\n")
+
+        tutorial_text.insert(tk.END, "Passo 3: Scaricare la chiave privata\n", ("bold"))
+        tutorial_text.insert(tk.END, "1. Clicca sul nome dell'account di servizio appena creato.\n")
+        tutorial_text.insert(tk.END, "2. Vai alla scheda 'Chiavi' e clicca su 'Aggiungi chiave' -> 'Crea nuova chiave'.\n")
+        tutorial_text.insert(tk.END, "3. Scegli 'JSON' come tipo di chiave. Il file verrà scaricato automaticamente.\n\n")
+
+        tutorial_text.insert(tk.END, "Passo 4: Caricare il file delle credenziali\n", ("bold"))
+        tutorial_text.insert(tk.END, "Ora clicca sul pulsante 'Seleziona File Credenziali' qui sotto per caricare il file JSON appena scaricato. Il bot lo rinominerà in 'credentials.json' e lo posizionerà nella cartella corretta:\n")
+        tutorial_text.insert(tk.END, f"{self.user_data_path}\n\n", ("bold"))
+
+        tutorial_text.insert(tk.END, "Passo 5: Condividere il foglio di calcolo\n", ("bold"))
+        tutorial_text.insert(tk.END, "Apri il tuo foglio di Google Sheets e clicca su 'Condividi'. Incolla l'indirizzo email dell'account di servizio (lo trovi nel file JSON) e concedi il permesso 'Editor'.\n")
+        tutorial_text.configure(state='disabled')
+        
+        bottom_frame = ttk.Frame(tutorial_window)
+        bottom_frame.pack(pady=(0, 10))
+        
+        creds_btn = ttk.Button(bottom_frame, text="Seleziona File Credenziali", command=self.handle_credentials_file, bootstyle="success")
+        creds_btn.pack(side=tk.LEFT, padx=(0, 20))
+        
+        close_btn = ttk.Button(bottom_frame, text="Chiudi", command=lambda: tutorial_window.destroy(), bootstyle="primary")
+        close_btn.pack(side=tk.LEFT)
+
+    def handle_credentials_file(self):
+        """Permette all'utente di selezionare il file JSON e lo sposta/rinomina."""
+        source_path = filedialog.askopenfilename(
+            title="Seleziona il file 'credentials.json' appena scaricato",
+            filetypes=[("File JSON", "*.json")]
+        )
+        if not source_path:
+            return
+
+        destination_path = os.path.join(self.user_data_path, "credentials.json")
+        os.makedirs(self.user_data_path, exist_ok=True)  # crea la cartella se non esiste
+
+        try:
+            # Se già esiste, chiedi conferma prima di sovrascrivere
+            if os.path.exists(destination_path):
+                overwrite = messagebox.askyesno(
+                    "Sovrascrivere file?",
+                    f"Esiste già un file 'credentials.json' in:\n{destination_path}\n\nVuoi sostituirlo?"
+                )
+                if not overwrite:
+                    return
+
+            shutil.copyfile(source_path, destination_path)
+            self._log_message(f"File credenziali copiato e rinominato con successo in: {destination_path}")
+            messagebox.showinfo(
+                "Successo",
+                f"File 'credentials.json' configurato correttamente!\n"
+                f"Ora puoi condividere il tuo foglio di calcolo con l'indirizzo email di servizio.\n"
+                f"Il file è stato salvato in:\n{self.user_data_path}"
+            )
+        except Exception as e:
+            self._log_message(f"Errore durante la gestione del file credenziali: {e}")
+            messagebox.showerror("Errore", f"Errore durante la gestione del file: {e}. Controlla i permessi della cartella.")
+
 
     def connect_to_sheets(self):
         """Connessione a Google Sheets tramite gspread."""
