@@ -469,10 +469,16 @@ class BotApp(ttk.Frame):
     
     def leggi_file_dati(self, file_path):
         """
-        Legge un file di testo, lo divide in blocchi e ritorna i dati estratti in modo robusto.
-        Rimuove sempre la porzione 'SISTEMA ...' (es. 'SISTEMA INVIO ONLINE - SITO WEB' o
-        'SISTEMA DI INVIO ...') prima del parsing così quella parte non viene mai inviata su Google Sheets.
+        Legge un file di testo e restituisce lista di righe parsate:
+        [nome, cognome, eta, occupazione, email, telefono]
+
+        Migliorata la rimozione delle "code canale" (es. SISTEMA INVIO, MECCANISMO TRAMITE UNICO,
+        DIGITURBO / PIGITURBO, NEW ..., MIDDLE SHORT ..., FACEBOOK, etc.), incluse varianti
+        come 'PIGITURBO X' o parole che finiscono in 'turbo'. Questa porzione viene rimossa
+        prima del parsing per evitare che finisca in cognome/occupazione.
         """
+        import re, os, shutil
+
         dati_emails = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -526,20 +532,20 @@ class BotApp(ttk.Frame):
                 else:
                     return digits
 
-            # parole chiave occupazione
+            # keywords utili a riconoscere occupazioni (non includere qui "sistema/invio" ecc)
             OCCUPATION_KEYWORDS = {
                 'data','scientist','developer','engineer','ingegnere','analyst','analista',
                 'manager','director','cto','ceo','founder','owner','product','designer','marketing',
                 'sales','consultant','consulente','responsabile','head','research','ricerca',
-                'system','sistema','invio','online','site','sito','web','interno','internal',
                 'operations','operation','specialist','teacher','professor','prof','doctor','dr',
-                'student','studente','amministratore','admin','support','supporto','dev','architect'
+                'student','studente','amministratore','admin','support','supporto','dev','architect',
+                'impiegato','impiegata','operaio','operaia','libero','professionista'
             }
 
             def token_is_occupation(tok):
                 if not tok:
                     return False
-                t = re.sub(r'[^A-Za-z0-9]', '', tok).lower()
+                t = re.sub(r'[^A-Za-zÀ-ÿ0-9]', '', tok).lower()
                 if not t:
                     return False
                 if t in OCCUPATION_KEYWORDS:
@@ -549,10 +555,35 @@ class BotApp(ttk.Frame):
                         return True
                 return False
 
-            # pattern per rimuovere la porzione "SISTEMA ...", compresi "SISTEMA DI INVIO"
-            SYSTEM_REMOVE_RE = re.compile(r'\bSISTEMA(?:\s+DI)?\s+INVIO\b.*', re.IGNORECASE)
-            # rimuove anche tag di tipo "EMAIL_INTERNAL", "SITO WEB", "ONLINE" eventuali rimasugli
-            TRAILING_TAGS_RE = re.compile(r'\b(EMAIL_INTERNAL|SITO\s+WEB|SITO|ONLINE|SITE|WEB|INTERNAL)\b.*', re.IGNORECASE)
+            # ----------------- regex robusta per rimuovere le "code canale" ---------------
+            # include: SISTEMA DI INVIO, MECCANISMO TRAMITE UNICO, DIGITURBO/PIGITURBO, parole *turbo*,
+            # NEW ..., MIDDLE/SHORT, FACEBOOK, INSTAGRAM, TIKTOK, WHATSAPP, SITO WEB, ONLINE, EMAIL_INTERNAL, ecc.
+            CHANNEL_REMOVE_RE = re.compile(
+                r'\b(?:'
+                r'SISTEMA(?:\s+DI)?\s+INVIO|'          # SISTEMA DI INVIO / SISTEMA INVIO
+                r'MECCANISMO\s+TRAMITE\s+UNICO|'      # MECCANISMO TRAMITE UNICO
+                r'(?:DI)?DIGITURBO(?:\s+X)?|'         # DIGITURBO / (possibile prefisso)
+                r'PIGITURBO(?:\s+X)?|'                # PIGITURBO (typo variante)
+                r'\w*turbo\b|'                        # catch-all parole che finiscono con 'turbo'
+                r'NEW(?:\s+[A-ZÀ-Ö0-9][A-ZÀ-Ö0-9\w-]+)?|'  # NEW ... (seguìto da parola)
+                r'MIDDLE(?:\s+SHORT(?:\s+[A-ZÀ-Ö0-9\w-]+)?)?|' # MIDDLE / MIDDLE SHORT / MIDDLE SHORT GIAN
+                r'SHORT|'                             
+                r'DRAGOTA|'                            # esempio presente negli screencap
+                r'FACEBOOK|INSTAGRAM|TIKTOK|WHATSAPP|'
+                r'SITO\s+WEB|SITO|ONLINE|EMAIL(?:_INTERNAL)?|FACEBOOK'
+                r')\b.*',
+                re.IGNORECASE | re.UNICODE
+            )
+
+            def strip_channels(s: str) -> str:
+                # rimuove dalla prima occorrenza di un marker fino a fine riga
+                if not s:
+                    return ''
+                s2 = CHANNEL_REMOVE_RE.sub(' ', s)
+                s2 = re.sub(r'\s{2,}', ' ', s2).strip()
+                return s2
+
+            # -----------------------------------------------------------------------
 
             for blocco in blocchi:
                 if not blocco.strip():
@@ -567,19 +598,16 @@ class BotApp(ttk.Frame):
                 telefono_raw = phone_match.group(0).strip() if phone_match else ''
                 telefono_formatted = format_phone(telefono_raw)
 
-                # Rimuovo email e telefono dal testo prima di cercare l'età
+                # prepare text_for_age: remove phone/email and channel tails
                 text_for_age = text
                 if telefono_raw:
                     text_for_age = re.sub(re.escape(telefono_raw), ' ', text_for_age)
                     text_for_age = re.sub(r'\+\d[\d\s\-\.\(\)]{4,}\d', ' ', text_for_age)
                 if email:
                     text_for_age = re.sub(re.escape(email), ' ', text_for_age)
+                text_for_age = strip_channels(text_for_age)
 
-                # Rimuovo sempre la porzione 'SISTEMA ...' anche dal text_for_age così non influenza nulla
-                text_for_age = SYSTEM_REMOVE_RE.sub(' ', text_for_age)
-                text_for_age = TRAILING_TAGS_RE.sub(' ', text_for_age)
-
-                # ricerca età dopo aver tolto telefono/email e 'SISTEMA...'
+                # find age
                 age_match = re.search(r'\b([1-9][0-9]{0,2})\b', text_for_age)
                 age = ''
                 start_age = end_age = None
@@ -590,16 +618,15 @@ class BotApp(ttk.Frame):
                         start_age = age_match.start(1)
                         end_age = age_match.end(1)
 
+                # first line cleaned for parsing name/occupation
                 prima_riga = righe[0] if righe else ''
-                # importante: rimuovo la porzione 'SISTEMA...' dalla prima riga PRIMA di tokenizzare
-                prima_riga = SYSTEM_REMOVE_RE.sub(' ', prima_riga).strip()
-                prima_riga = TRAILING_TAGS_RE.sub(' ', prima_riga).strip()
+                prima_riga = strip_channels(prima_riga)
 
                 fullname = ''
                 occupation = ''
 
                 if age:
-                    # se l'età è presente, dividiamo attorno alla sua posizione
+                    # split around age
                     m_in_first = re.search(r'\b' + re.escape(age) + r'\b', prima_riga)
                     if m_in_first:
                         before = prima_riga[:m_in_first.start()].strip()
@@ -608,18 +635,10 @@ class BotApp(ttk.Frame):
                         before = text_for_age[:start_age].strip()
                         after = text_for_age[end_age:].strip()
                     fullname = before
-                    # rimuovo eventuale "SISTEMA..." in after per sicurezza
-                    after = SYSTEM_REMOVE_RE.sub(' ', after)
-                    after = TRAILING_TAGS_RE.sub(' ', after)
-                    sys_match = re.search(r'\bSISTEMA\s+INVIO\b', after, re.IGNORECASE)
-                    if sys_match:
-                        occupation = after[:sys_match.start()].strip()
-                    else:
-                        occupation = after
+                    occupation = strip_channels(after)
                 else:
-                    # Se manca età: cerchiamo indice in cui inizia l'occupazione nella prima riga
-                    prima_riga_clean = prima_riga.strip()
-                    prima_riga_clean = re.sub(r'\s*-\s*', ' - ', prima_riga_clean).strip()
+                    # heuristics when age missing
+                    prima_riga_clean = re.sub(r'\s*-\s*', ' - ', prima_riga).strip()
                     tokens = [t for t in re.split(r'\s+', prima_riga_clean) if t != '']
 
                     occ_idx = None
@@ -627,6 +646,7 @@ class BotApp(ttk.Frame):
                         if token_is_occupation(tok):
                             occ_idx = i
                             break
+
                     if occ_idx is not None and occ_idx >= 1:
                         fullname = ' '.join(tokens[:occ_idx]).strip()
                         occupation = ' '.join(tokens[occ_idx:]).strip()
@@ -644,26 +664,23 @@ class BotApp(ttk.Frame):
                                     fullname = ' '.join(tokens[:2]).strip()
                                     occupation = ' '.join(tokens[2:]).strip()
                             else:
+                                # fallback: primi due token nome+cognome, resto occupazione
                                 fullname = ' '.join(tokens[:2]).strip()
                                 occupation = ' '.join(tokens[2:]).strip()
 
-                # pulizia definitiva: rimuovo sempre 'SISTEMA...' e tag finali dall'occupation
-                occupation = SYSTEM_REMOVE_RE.sub(' ', occupation).strip()
-                occupation = TRAILING_TAGS_RE.sub(' ', occupation).strip()
-                occupation = re.sub(r'\s{2,}', ' ', occupation).strip()
+                    occupation = strip_channels(occupation)
 
-                # split fullname in nome / cognome (nome = primo token, cognome = resto)
+                # split fullname into nome / cognome
                 nome, cognome = '', ''
                 if fullname:
                     parts = fullname.split()
                     if len(parts) == 1:
                         nome = parts[0]
-                        cognome = ''
                     else:
                         nome = parts[0]
                         cognome = ' '.join(parts[1:])
 
-                # fallback: email e telefono da righe specifiche (se non già trovati)
+                # fallback: email/telefono da righe successive
                 if not email and len(righe) > 1 and '@' in righe[1]:
                     email = righe[1].strip()
                 if (not telefono_formatted) and len(righe) > 2:
@@ -683,6 +700,8 @@ class BotApp(ttk.Frame):
         except Exception as e:
             self._log_message(f"Errore durante la lettura del file: {e}")
             return []
+
+
 
 
 
