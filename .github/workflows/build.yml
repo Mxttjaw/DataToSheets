@@ -59,13 +59,18 @@ jobs:
         run: |
           pyinstaller \
             --onefile \
+            --clean \
+            --noconfirm \
             --name ${{ matrix.exe_name }} \
             ${{ matrix.icon }} \
             --add-data="src/assets/icons/*:assets/icons" \
             --additional-hooks-dir=hooks \
             --hidden-import='PIL._tkinter_finder' \
-            --hidden-import='PIL.Image' \
+            --hidden-import='PIL._imagingtk' \
             --hidden-import='PIL.ImageTk' \
+            --hidden-import='PIL.Image' \
+            --hidden-import='PIL.ImageDraw' \
+            --hidden-import='ttkbootstrap' \
             $( [ "${{ matrix.os }}" == "macos-latest" ] && echo "--osx-bundle-identifier com.yourdomain.DataToSheets" ) \
             src/bot.py
 
