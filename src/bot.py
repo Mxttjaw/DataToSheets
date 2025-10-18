@@ -37,7 +37,7 @@ else:
 
 load_dotenv()
 
-CURRENT_VERSION = "1.8.1"
+CURRENT_VERSION = "1.8.2"
 
 # regex globali (case-insensitive dove opportuno)
 EMAIL_RE = re.compile(r'[\w\.+-]+@[\w\.-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?', re.I)
@@ -100,6 +100,74 @@ class BotApp(ttk.Frame):
 
         # Avvia la verifica degli aggiornamenti in un thread separato
         Thread(target=lambda: self.updater.check_for_updates(on_update_available=lambda: self.update_available.set(True)), daemon=True).start()
+        try:
+            self._load_local_settings()
+        except Exception:
+            pass
+
+    def _get_local_settings_path(self):
+        # Assicurati che self.user_data_path esista nella tua classe.
+        # Se non esiste, usa la home
+        base = getattr(self, 'user_data_path', None) or os.path.expanduser("~")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "mxttjaw_bot_settings.json")
+
+    def _persist_local_settings(self):
+        """
+        Salva localmente le impostazioni in un file JSON dentro self.user_data_path per persistenza tra sessioni.
+        """
+        try:
+            cfg = {
+                "source_mode": getattr(self, "source_mode", tk.StringVar(value="file")).get() if hasattr(self, "source_mode") else "",
+                "file_path": getattr(self, "file_path_var", tk.StringVar()).get() if hasattr(self, "file_path_var") else "",
+                "source_spreadsheet": getattr(self, "source_spreadsheet_var", tk.StringVar()).get() if hasattr(self, "source_spreadsheet_var") else "",
+                "source_worksheet": getattr(self, "source_worksheet_var", tk.StringVar()).get() if hasattr(self, "source_worksheet_var") else "",
+                "dest_spreadsheet": getattr(self, "dest_spreadsheet_var", tk.StringVar()).get() if hasattr(self, "dest_spreadsheet_var") else "",
+                "dest_worksheet": getattr(self, "dest_worksheet_var", tk.StringVar()).get() if hasattr(self, "dest_worksheet_var") else ""
+            }
+            p = self._get_local_settings_path()
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, ensure_ascii=False, indent=2)
+            self._log_message(f"Impostazioni locali salvate: {p}")
+        except Exception as e:
+            self._log_message(f"Errore salvando impostazioni locali: {e}")
+
+    def _load_local_settings(self):
+        """
+        Carica le impostazioni locali, se esistono, e le ripopola nelle variabili
+        dell'interfaccia (self.*_var). Chiamalo in inizializzazione della GUI.
+        """
+        try:
+            p = self._get_local_settings_path()
+            if not os.path.exists(p):
+                return
+            with open(p, "r", encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            # usa set() sulle StringVar se esistono
+            if hasattr(self, "source_mode") and cfg.get("source_mode") is not None:
+                try: self.source_mode.set(cfg.get("source_mode",""))
+                except: pass
+            if hasattr(self, "file_path_var") and cfg.get("file_path") is not None:
+                try: self.file_path_var.set(cfg.get("file_path",""))
+                except: pass
+            if hasattr(self, "source_spreadsheet_var") and cfg.get("source_spreadsheet") is not None:
+                try: self.source_spreadsheet_var.set(cfg.get("source_spreadsheet",""))
+                except: pass
+            if hasattr(self, "source_worksheet_var") and cfg.get("source_worksheet") is not None:
+                try: self.source_worksheet_var.set(cfg.get("source_worksheet",""))
+                except: pass
+            if hasattr(self, "dest_spreadsheet_var") and cfg.get("dest_spreadsheet") is not None:
+                try: self.dest_spreadsheet_var.set(cfg.get("dest_spreadsheet",""))
+                except: pass
+            if hasattr(self, "dest_worksheet_var") and cfg.get("dest_worksheet") is not None:
+                try: self.dest_worksheet_var.set(cfg.get("dest_worksheet",""))
+                except: pass
+
+            self._log_message(f"Impostazioni locali caricate: {p}")
+        except Exception as e:
+            # non bloccante
+            try: self._log_message(f"Errore caricando impostazioni locali: {e}")
+            except: pass
 
     # --- Metodi per la gestione della GUI ---
 
@@ -1272,23 +1340,39 @@ class BotApp(ttk.Frame):
     
     def _valida_e_corregge_campi(self, nome, cognome, eta, occupazione, email, telefono):
         """Validazione e correzione finale dei campi estratti."""
-        # Se l'età è presente ma non è nel range realistico, la resetta
+
+        # Pulizia base
         if eta and eta.isdigit():
             age_val = int(eta)
             if not (15 <= age_val <= 120):
                 eta = ""
-        
-        # Se il nome inizia con un trattino, lo rimuove
+
         if nome and nome.startswith('-'):
             nome = nome[1:].strip()
-        
-        # Se il cognome contiene numeri, prova a pulirlo
+
         if cognome and any(char.isdigit() for char in cognome):
-            # Rimuove numeri alla fine del cognome
             cognome = re.sub(r'\s*\d+$', '', cognome)
-            # Rimuove numeri all'inizio del cognome
             cognome = re.sub(r'^\d+\s*', '', cognome)
+
         
+        nome_ok = bool(nome.strip())
+        cognome_ok = bool(cognome.strip())
+        altri_dati = any([
+            email.strip(),
+            telefono.strip(),
+            eta.strip(),
+            occupazione.strip()
+        ])
+
+        # Se manca tutto tranne nome o cognome singolo -> SCARTA
+        if (nome_ok != cognome_ok) and not altri_dati:
+            # ritorna tutto vuoto per segnalare che questo record è da ignorare
+            return "", "", "", "", "", ""
+
+        # Se non c’è neanche nome né cognome, scarta comunque
+        if not nome_ok and not cognome_ok:
+            return "", "", "", "", "", ""
+
         return nome, cognome, eta, occupazione, email, telefono
 
     def _estrai_campi_strutturati(self, testo):
@@ -1454,6 +1538,9 @@ class BotApp(ttk.Frame):
                 telefono = self._pulizia_telefono(telefono)
                 
                 dati = [nome, cognome, eta, occupazione, email, telefono]
+                # se TUTTI i campi sono vuoti -> scarta
+                if not any(field and str(field).strip() for field in dati):
+                    continue
                 dati_emails.append(dati)
                 
             return dati_emails
@@ -1772,6 +1859,11 @@ class BotApp(ttk.Frame):
 
             dati_completi = []
             
+            try:
+                self._persist_local_settings()
+            except Exception:
+                pass     
+               
             if source_mode == 'file':
                 # Modalità FILE: leggi da file locale
                 file_path = self.file_path_var.get()
